@@ -15,21 +15,13 @@
 #include <string>
 #include <time.h>
 #include <vector>
+#include <math.h>
 using namespace std;
 
-/*
-	void calculate()
-	{
-		// Parsing the 10-byte key into three unsigned int for comparision
-		m_d1 = (m_data[0] << 24) + (m_data[1] << 16) + (m_data[2] << 8) + m_data[3];
-		m_d2 = (m_data[4] << 24) + (m_data[5] << 16) + (m_data[6] << 8) + m_data[7];
-		m_d3 = (m_data[8] << 8) + m_data[9];
-	}
-
-*/
-
 // An array of SortServer
-int * SortServers;
+int totalServers = 0;
+int hashBar = 0;
+std::vector<int> SortServers;
 
 int open_connection(char* host, int port)
 {
@@ -72,6 +64,26 @@ int open_connection(char* host, int port)
 	}
 }
 
+void initialize()
+{
+	// Get a list of SortServer from servers.cfg
+	// This is a global configuration file for all Sender
+	std::ifstream conf_file("servers.cfg");
+	char line[1024];
+	while (conf_file.getline(line, 1024))
+	{
+		char* server = strtok(line, ":");
+		int port = atoi(strtok(NULL, ":"));
+		
+		// Create a socket connection to the SortServer
+		int socket = open_connection(server, port);
+		// Add the socket to the vector
+		SortServers.push_back(socket);
+		cout << "Server: " << server << "\tPort: " << port << "\n";
+		totalServers++;
+	}
+}
+
 int send_file(char* filename)
 {
 	// create an ifstream from the file
@@ -87,61 +99,52 @@ int send_file(char* filename)
 	// Close the file
 	in.close();
 
-	
-/*	ofstream outfile ("new.txt", ofstream::binary);
-	outfile.write (buffer, size);
-	outfile.close();
-*/
-	write(SortServers[0], buffer, size);
-	string exit_string = "EXIT";
-	write(SortServers[0], exit_string.c_str(), 4);
-/*
 	// We know that each record is 100 bytes 
 	int count = size / 100;
 	char record[100];
 	for (int i=0; i<count; i++)
 	{
+		int start = 100*i;
+		for (int j=0; j<100; j++)
+		{
+			record[j] = buffer[start+j];
+		}
+		int key = (unsigned char) record[0];
+		int target = floor(key/hashBar);
+		cout << "Key: " << key << "\tTarget: " << target << "\n";
+		write(SortServers.at(target), record, 100);
 	}
-*/
+}
+
+int send_exit_signal()
+{
+	// Send EXIT signal
+	string exit_string = "EXIT";
+	for (int i=0; i< totalServers; i++)
+	{
+		write(SortServers.at(i), exit_string.c_str(), 4);
+	}
 }
 
 int main(int argc, char* argv[])
 {    
-
-	int portNo = atoi(argv[1]);
-	SortServers = new int[1];
-	SortServers[0] = open_connection("localhost", portNo);
-	send_file(argv[2]);
-/*	int count = 0;
-
-	// Get file size
-	in.seekg(0, std::ios::end);
-	int size = in.tellg();
-	// Create a buffer as large as the file itself
-	char * buffer = new char[in.tellg()];
-	// Go back to the beginning of the file and read the whole thing
-	in.seekg(0, std::ios::beg);
-	in.read(buffer, size);
-	// Close the file
-	in.close();
-*/
-/*
-	while (in)	
-
-//	while (strlen(buffer) != 0)
+	// Get a list of SortServer from servers.cfg and create socket connections
+	initialize();
+	hashBar = ceil(256 / totalServers);
+	cout << "Total Servers: " << totalServers << "\n";
+	cout << "Hash Bar: " << hashBar << "\n";	
+	
+	// Get a list of data files to send, this list is in a text file with the filename in argv[1]
+	std::ifstream conf_file(argv[1]);
+	char line[1024];
+	// Send the data to SortServer, one file by one file
+	while (conf_file.getline(line, 1024))
 	{
-		bzero(buffer, 101);
-		in.read(buffer, 100);
-		if (strlen(buffer) !=0)
-		{			
-			write(client, buffer, 100);
-			count++;
-			cout << count << "\t" << strlen(buffer) << "\n";
-		}	
-//		bzero(buffer, 101);
-//		in.read(buffer, 100);
+		cout << "File: " << line << "\n";
+		send_file(line);
 	}
-	cout << "Record Count: " << count << "\n";
-*/
+
+	// Send EXIT signal to SortServer
+	send_exit_signal();
 }
 

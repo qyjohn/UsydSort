@@ -40,18 +40,30 @@ struct thread_args
 };
 
 
+/**
+ *
+ * UsydSort - SortServer
+ *
+ * main() method
+ * 1. create server socket and wait for client (Sender) connections
+ * 2. for each client, create a pthread with a queue to handle incoming data
+ * 3. wait for all threads to complete
+ * 4. merge all the queues, save the merged and sorted data into a file
+ *
+ */
+
 int main(int argc, char* argv[])
 {
 	// Check command syntax
-	if (argc < 3)
+	if (argc < 4)
 	{
-		cerr << "Syntax : ./SortServer <port> <total_threads>" << endl;
+		cerr << "Syntax : ./SortServer <port> <total_threads> <output_filename>" << endl;
 		return 0;
 	}
     
 	// Create the server socket
-	int portNo = atoi(argv[1]);
-	int listenFd = create_server(portNo);
+	int port = atoi(argv[1]);
+	int listenFd = create_server(port);
 	{
 		if (listenFd <=0)	exit(1);
 	}
@@ -98,8 +110,8 @@ int main(int argc, char* argv[])
 		}    
 	}
     
-	// Save sorted results to file
-	std::ofstream outfile ("new2.txt",std::ofstream::binary);
+	// Save sorted results to file, the filename is specified in argv[3]
+	std::ofstream outfile (argv[3],std::ofstream::binary);
 	while(!queues[0].empty()) 
 	{
 		outfile.write (queues[0].top().m_data, 100);
