@@ -88,31 +88,38 @@ int send_file(char* filename)
 {
 	// create an ifstream from the file
 	ifstream in(filename, ifstream::in | ios::binary);
-	// Get file size
-	in.seekg(0, std::ios::end);
-	int size = in.tellg();
-	// Create a buffer as large as the file itself
-	char * buffer = new char[in.tellg()];
-	// Go back to the beginning of the file and read the whole thing
-	in.seekg(0, std::ios::beg);
-	in.read(buffer, size);
-	// Close the file
-	in.close();
 
-	// We know that each record is 100 bytes 
-	int count = size / 100;
-	char record[100];
-	for (int i=0; i<count; i++)
+	if (in)	// the file was open successfully
 	{
-		int start = 100*i;
-		for (int j=0; j<100; j++)
+		// Get file size
+		in.seekg(0, std::ios::end);
+		int size = in.tellg();
+		// Create a buffer as large as the file itself
+		char * buffer = new char[in.tellg()];
+		// Go back to the beginning of the file and read the whole thing
+		in.seekg(0, std::ios::beg);
+		in.read(buffer, size);
+		// Close the file
+		in.close();
+
+		// We know that each record is 100 bytes 
+		int count = size / 100;
+		char record[100];
+		for (int i=0; i<count; i++)
 		{
-			record[j] = buffer[start+j];
+			int start = 100*i;
+			for (int j=0; j<100; j++)
+			{
+				record[j] = buffer[start+j];
+			}
+			int key = (unsigned char) record[0];
+			int target = floor(key/hashBar);
+			write(SortServers.at(target), record, 100);
 		}
-		int key = (unsigned char) record[0];
-		int target = floor(key/hashBar);
-		cout << "Key: " << key << "\tTarget: " << target << "\n";
-		write(SortServers.at(target), record, 100);
+
+		// free the memory being used by the file buffer
+		delete[] buffer;
+
 	}
 }
 
