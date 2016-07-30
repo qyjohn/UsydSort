@@ -13,6 +13,8 @@
 #include <string>
 #include <pthread.h>
 #include <queue>
+#include <fcntl.h>
+#include <malloc.h>
 
 using namespace std;
 
@@ -34,7 +36,8 @@ class SortRecord
 int create_server(int port);
 void *sort_thread(void *args);
 bool test_exit(char* test);
-void save_queue_to_file(std::priority_queue<SortRecord> *q, char* filename);
+void save_queue_to_file_buffer_io(std::priority_queue<SortRecord> *q, char* filename);
+void save_queue_to_file_direct_io(std::priority_queue<SortRecord> *q, char* filename);
 void merge_temp_files_and_save(char* dir, char* output_file);
 void load_temp_file_to_queue(std::priority_queue<SortRecord> *q, char* filename);
 time_t start_time, current_time;
@@ -163,7 +166,8 @@ int main(int argc, char* argv[])
 		// Save sorted results to file, the filename is specified in argv[4]
 		time(&current_time);
 		cout << current_time << "\tSaving sorted results to output file " << argv[4] << "\n";
-		save_queue_to_file(&queues[0], argv[4]);
+//		save_queue_to_file_buffer_io(&queues[0], argv[4]);
+		save_queue_to_file_direct_io(&queues[0], argv[4]);
 	}
 	// Batch mode
 	// Data in a large number of small files in the temp directory, 1,000,000 records in each file.
@@ -299,7 +303,7 @@ void *sort_thread (void *args)
 						time(&current_time);
 						sprintf(filename_string, "%s/%lu-%d", temp_dir, pthread_self(), temp_file_id);
 						cout << current_time << "\tThread "<< pthread_self() << " saving 1,000,000 records to " << filename_string << "\n";
-						save_queue_to_file(q, filename_string);
+						save_queue_to_file_buffer_io(q, filename_string);
 
 						// Others
 						temp_file_id++;
@@ -319,7 +323,7 @@ void *sort_thread (void *args)
 		time(&current_time);
 		sprintf(filename_string, "%s/%lu-%d", temp_dir, pthread_self(), temp_file_id);
 		cout << current_time << "\tThread "<< pthread_self() << " saving all other records to " << filename_string << "\n";
-		save_queue_to_file(q, filename_string);
+		save_queue_to_file_buffer_io(q, filename_string);
 	}
 
 	// Print out debug message
@@ -346,19 +350,75 @@ bool test_exit(char* test)
 
 /**
  *
- * Save the content in a queue to an output file
+ * Save the content in a queue to an output file using BufferIO.
  *
  */
 
-void save_queue_to_file(std::priority_queue<SortRecord> *q, char* filename)
+void save_queue_to_file_buffer_io(std::priority_queue<SortRecord> *q, char* filename)
 {
-	std::ofstream outfile (filename,std::ofstream::binary);
-	while(!q->empty()) 
+		std::ofstream outfile (filename,std::ofstream::binary);
+		while(!q->empty()) 
+		{
+			outfile.write (q->top().m_data, 100);
+			q->pop();
+		}
+		outfile.close();
+}
+
+
+/**
+ *
+ * Save the content in a queue to an output file using DirectIO.
+ *
+ */
+
+void save_queue_to_file_direct_io(std::priority_queue<SortRecord> *q, char* filename)
+{
+	// Use DirectIO to save data in 512 record blocks
+	if (q->size() >= 512)
 	{
-		outfile.write (q->top().m_data, 100);
-		q->pop();
+		char filename_1[1024];
+		sprintf(filename_1, "%s-1", filename);
+		int fd = open(filename_1, O_RDWR | O_CREAT | O_DIRECT | O_TRUNC, 0644);
+		// DirectIO buffer, 512 is block size, 51200 is buffer size for 512 records
+		int i, j, base;
+		char record[100];	// each record is 100 byte
+		char buffer[51200];	// 512 records = 51200 bytes
+		void *temp = memalign(512, 51200);
+		while (q->size() >=512)
+		{
+			base = 0;
+			for (i=0; i<512; i++)	// Get 512 records at a time
+			{
+				memcpy(record, q->top().m_data, 100);
+//				cout << "Done strcpy\n";
+				for (j=0; j<100; j++)
+				{
+					buffer[base] = record[j];
+					base++;
+				}
+				q->pop();
+			}
+			memcpy(temp, buffer, 51200);
+			write(fd, temp, 51200);
+		}
+		free(temp);
+		close(fd);
 	}
-	outfile.close();
+
+	// Use BufferIO to save the rese data
+	if (!q->empty())
+	{
+		char filename_2[1024];
+		sprintf(filename_2, "%s-2", filename);
+		std::ofstream outfile (filename_2,std::ofstream::binary);
+		while(!q->empty()) 
+		{
+			outfile.write (q->top().m_data, 100);
+			q->pop();
+		}
+		outfile.close();
+	}
 }
 
 
@@ -395,7 +455,7 @@ void merge_temp_files_and_save(char* dir, char* output_file)
 	// Save merged results to the final output file
 	time(&current_time);
 	cout << current_time << "\tSaving sorted results to output file " << output_file << "\n";
-	save_queue_to_file(&q, output_file);
+	save_queue_to_file_buffer_io(&q, output_file);
 }
 
 /**
