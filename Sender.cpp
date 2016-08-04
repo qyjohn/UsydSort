@@ -87,8 +87,20 @@ void initialize()
 int send_file(char* filename)
 {
 	// create an ifstream from the file
-	ifstream in(filename, ifstream::in | ios::binary);
+	int key, target;	
+	char record[100];
 
+	ifstream in(filename, ifstream::in | ios::binary);
+	while (!in.eof())
+	{  
+		in.read(record, 100);
+		key = (unsigned char) record[0];
+		target = floor(key/hashBar);
+		write(SortServers.at(target), record, 100);
+	}
+	in.close();
+/*
+	ifstream in(filename, ifstream::in | ios::binary);
 	if (in)	// the file was open successfully
 	{
 		// Get file size
@@ -121,6 +133,8 @@ int send_file(char* filename)
 		delete[] buffer;
 
 	}
+*/
+
 }
 
 int send_exit_signal()
