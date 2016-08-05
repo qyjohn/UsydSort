@@ -40,13 +40,12 @@ void *sort_thread(void *args);
 void *server_thread(void *args);
 
 bool test_exit(char* test);
-void save_queue_to_file_buffer_io(std::priority_queue<SortRecord> *q, char* filename);
-void save_queue_to_file_direct_io(std::priority_queue<SortRecord> *q, char* filename);
-void merge_temp_files_and_save(char* dir, char* output_file);
+void save_queue_to_file_buffer_io(std::priority_queue<SortRecord> *q, char* filename, int thread);
+void save_queue_to_file_direct_io(std::priority_queue<SortRecord> *q, char* filename, int thread);
+void merge_temp_files_and_save(char* dir, char* output_file, int thread);
 void load_temp_file_to_queue(std::priority_queue<SortRecord> *q, char* filename);
 time_t current_time;
 char message[1024];
-bool next_batch = false;
 
 struct server_thread_args
 {
@@ -120,10 +119,8 @@ int main(int argc, char* argv[])
 	char *node_name = argv[1];
 	int port_00 = atoi(argv[2]);
 	int threads = atoi(argv[3]);
-	int half_threads = floor(threads / 2);
 	int clients = atoi(argv[4]);
 	char *work_folder = argv[5];
-
 
 	pthread_t all_server_threads[threads];
 	struct server_thread_args args[threads];
@@ -134,7 +131,7 @@ int main(int argc, char* argv[])
 		args[i].thread_id = i;
 		// Only the first server thread works in default mode, no need to save intermediate
 		// data onto disk
-		if (i<half_threads)
+		if (i%2 == 0)
 		{
 			args[i].mode = 0;
 		}
@@ -159,28 +156,11 @@ int main(int argc, char* argv[])
 		pthread_create(&all_server_threads[i], NULL, server_thread, (void*) &args[i]); 
 	}
 
-	// Wait for all server theads to exit, at this point thread 0 has already written its
-	// sorted data to disk
-	for(i = 0; i < threads; i++)
+	// Wait for all the server threads to exit. 
+	for (i=0; i<threads; i++)
 	{
 		pthread_join(all_server_threads[i], NULL);
 	}
-
-/*
-	// Starting from thread 1, loading intermediate data into memory and merge them, then
-	// save the final result to disk
-	for(i = 1; i < threads; i++)
-	{
-		sprintf(message, "Main: Processing intermediate data for thread %d...", i);
-		log_progress(message);
-		// Merging the intermediate records from Batch mode server threads.
-		// Data in a large number of small files in the temp directory, 1,000,000 records in each file.
-		// Need to load the data from these intermediate files and merge them together. After that, 
-		// save the merged content to the final output file
-		merge_temp_files_and_save(args[i].temp_dir, args[i].output_filename);
-	}
-*/
-
 }
 
 /**
@@ -234,18 +214,19 @@ void *server_thread(void *args)
 	pthread_t threadA[this_total_clients];
 	socklen_t len[this_total_clients];
 	std::priority_queue<SortRecord> queues[this_total_clients];
+	int clientSocket[this_total_clients];
+	struct sort_thread_args	sortArgs[this_total_clients];
 	sprintf(message, "Thread %d: Waiting for %d sender nodes to connect.", this_thread_id, this_total_clients);
 	log_progress(message);
 	// Wait for all Sender connections
 	// For each Sender, create a pthread with a dedicated queue to handle the incoming data
 	int noThread = 0;
-	struct sort_thread_args	sortArgs[this_total_clients];
 	while (noThread < this_total_clients)
 	{
 		//this is where client connects. svr will hang in this mode until client conn
 		len[noThread] = sizeof(clntAdd[noThread]);
-		int clientSocket = accept(listenFd, (struct sockaddr *)&clntAdd[noThread], &len[noThread]);
-		if (clientSocket < 0)
+		clientSocket[noThread] = accept(listenFd, (struct sockaddr *)&clntAdd[noThread], &len[noThread]);
+		if (clientSocket[noThread] < 0)
 		{
 			cerr << "Cannot accept connection" << endl;
 			return 0;
@@ -254,9 +235,9 @@ void *server_thread(void *args)
 		// Create a new thread to handle the input
 		sortArgs[noThread].server_thread_id = this_thread_id;
 		sortArgs[noThread].sender_id = noThread;
-		sortArgs[noThread].socket = clientSocket;
+		sortArgs[noThread].socket = clientSocket[noThread];
 		sortArgs[noThread].queue = &queues[noThread];	
-		sortArgs[noThread].mode = this_mode;	
+		sortArgs[noThread].mode = this_mode;
 		if (this_mode == 1)
 		{
 			sortArgs[noThread].temp_dir = this_temp_dir;
@@ -291,7 +272,7 @@ void *server_thread(void *args)
 		// Save sorted results to file
 		sprintf(message, "Thread %d: Saving sorted results to output file %s.", this_thread_id, this_output_filename);
 		log_progress(message);
-		save_queue_to_file_direct_io(&queues[0], this_output_filename);
+		save_queue_to_file_direct_io(&queues[0], this_output_filename, this_thread_id);
 		sprintf(message, "Thread %d: Output file %s has been written to disk.", this_thread_id, this_output_filename);
 		log_progress(message);
 	}
@@ -301,11 +282,13 @@ void *server_thread(void *args)
 	// save the merged content to the final output file
 	else if (this_mode == 1)
 	{
-		merge_temp_files_and_save(this_temp_dir, this_output_filename);
+		sprintf(message, "Thread %d Mode %d: Merging intermediate results.", this_thread_id, this_mode);
+		log_progress(message);
+		merge_temp_files_and_save(this_temp_dir, this_output_filename, this_thread_id);
 	}
 
 	// Server thread exits
-	sprintf(message, "Thread %d: Exit gracefully.", this_thread_id);
+	sprintf(message, "Thread %d Mode %d: Exit gracefully.", this_thread_id, this_mode);
 	log_progress(message);
 }
 
@@ -371,88 +354,108 @@ void *sort_thread (void *args)
 	// Print out debug message
 	sprintf(message, "Thread %d: Sender %d is now connected.", server_thread_id, sender_id);
 	log_progress(message);
-	char buffer[100], temp[100];
+	
+	int buffer_size = 10000;
+	char buffer[buffer_size], temp[100];
+	int i=0, j=0, size=0, marker=0, buffer_start=0, buffer_left=0;
     
 	// Default mode
 	if (mode == 0)
 	{
-		int i=0, j=0, size=0, marker=0;
 		while(true)
 		{
-			// Attempt to receive 100 bytes each time
-			size=recv(sock, buffer, 100, 0);
-			for (i=0; i<size; i++)
+			// Attempt to receive [buffer_size] bytes each time, unless the client disconnects
+			size=recv(sock, buffer, buffer_size, MSG_WAITALL);
+			buffer_start=0;
+			buffer_left = size;
+			while (buffer_left >= (100 - marker)) // Must be able to fit at least one more record 
 			{
-				temp[marker] = buffer[i];
-				marker++;
-				if (marker == 100)	// 100 bytes per record
-				{
-					// Create a SortRecord
-					SortRecord sr;
-					for (j=0; j<100; j++)	sr.m_data[j] = temp[j];
-					q->push(sr);
-
-					// Start another new record
-					marker = 0;
-				}
+				// Make one whole record
+				memcpy(&temp+marker, buffer+buffer_start, 100-marker);	// Make one full record
+				buffer_start = buffer_start + 100 - marker;
+				buffer_left = size - buffer_start;
+				
+				// Create a SortRecord
+				SortRecord sr;
+				memcpy(sr.m_data, temp, 100);
+				q->push(sr);
+				
+				// Start another new record
+				marker = 0;				
 			}
+			
+			if (buffer_left > 0)
+			{
+				memcpy(&temp, buffer+buffer_start, buffer_left);
+				marker = buffer_left;
+			}			
 	
 			// Test if the client disconnects
 			if ((marker == 4) && test_exit(temp))	break;
 		}
 	}
+	// Default mode
 	else if (mode == 1)
 	{
 		int temp_file_id = 0;
 		int temp_rec_count = 0;
-		int i=0, j=0, size=0, marker=0;
 		char filename_string[100];
-
 		while(true)
 		{
-			// Attempt to receive 100 bytes each time
-			size=recv(sock, buffer, 100, 0);
-			for (i=0; i<size; i++)
+			// Attempt to receive [buffer_size] bytes each time, unless the client disconnects
+			size=recv(sock, buffer, buffer_size, MSG_WAITALL);
+			buffer_start=0;
+			buffer_left = size;
+			while (buffer_left >= (100 - marker)) // Must be able to fit at least one more record 
 			{
-				temp[marker] = buffer[i];
-				marker++;
-				if (marker == 100)	// 100 bytes per record
+				// Make one whole record
+				memcpy(&temp+marker, buffer+buffer_start, 100-marker);	// Make one full record
+				buffer_start = buffer_start + 100 - marker;
+				buffer_left = size - buffer_start;
+				
+				// Create a SortRecord
+				SortRecord sr;
+				memcpy(sr.m_data, temp, 100);
+				q->push(sr);
+				
+				temp_rec_count++;
+				// Save 10,000,000 records to disk
+				if (temp_rec_count == 10000000)
 				{
-					// Create a SortRecord
-					SortRecord sr;
-					for (j=0; j<100; j++)	sr.m_data[j] = temp[j];
-					q->push(sr);
-					temp_rec_count++;
+					cout << "Preparing temp dir\n";
+					// Get the filename and save the records
+					sprintf(filename_string, "%s/%lu-%05d", temp_dir, pthread_self(), temp_file_id);
+					sprintf(message, "Thread %d: Sender %d saving 10,000,000 intermediate records to %s.", server_thread_id, sender_id, filename_string);
+					log_progress(message);
+					save_queue_to_file_buffer_io(q, filename_string, server_thread_id);
 
-					// Save 10,000,000 records to disk
-					if (temp_rec_count == 10000000)
-					{
-						// Get the filename and save the records
-						sprintf(filename_string, "%s/%lu-%05d", temp_dir, pthread_self(), temp_file_id);
-						sprintf(message, "Thread %d: Sender %d saving 10,000,000 intermediate records to %s.", server_thread_id, sender_id, filename_string);
-						log_progress(message);
-						save_queue_to_file_buffer_io(q, filename_string);
-
-						// Others
-						temp_file_id++;
-						temp_rec_count = 0;						
-					}
-
-					// Start another new record
-					marker = 0;
+					// Others
+					temp_file_id++;
+					temp_rec_count = 0;						
 				}
+
+				// Start another new record
+				marker = 0;				
 			}
+			
+			if (buffer_left > 0)
+			{
+				memcpy(&temp, buffer+buffer_start, buffer_left);
+				marker = buffer_left;
+			}			
 	
 			// Test if the client disconnects
 			if ((marker == 4) && test_exit(temp))	break;
 		}
+
 		// In batch mode, need to write the final left over records in the queue to temp file
 		// Get the filename
 		sprintf(filename_string, "%s/%lu-%05d", temp_dir, pthread_self(), temp_file_id);
 		sprintf(message, "Thread %d: Sender %d saving all other intermediate records to %s.", server_thread_id, sender_id, filename_string);
 		log_progress(message);
-		save_queue_to_file_buffer_io(q, filename_string);
+		save_queue_to_file_buffer_io(q, filename_string, server_thread_id);
 	}
+
 
 	// Print out debug message
 	sprintf(message, "Thread %d: Sender %d is now disconnected successfully.", server_thread_id, sender_id);
@@ -482,7 +485,7 @@ bool test_exit(char* test)
  *
  */
 
-void save_queue_to_file_buffer_io(std::priority_queue<SortRecord> *q, char* filename)
+void save_queue_to_file_buffer_io(std::priority_queue<SortRecord> *q, char* filename, int thread)
 {
 		std::ofstream outfile (filename,std::ofstream::binary);
 		while(!q->empty()) 
@@ -500,33 +503,29 @@ void save_queue_to_file_buffer_io(std::priority_queue<SortRecord> *q, char* file
  *
  */
 
-void save_queue_to_file_direct_io(std::priority_queue<SortRecord> *q, char* filename)
+void save_queue_to_file_direct_io(std::priority_queue<SortRecord> *q, char* filename, int thread)
 {
+	int i, j, base;
+	char buffer[51200];	// 512 records = 51200 bytes
+
 	// Use DirectIO to save data in 512 record blocks
 	if (q->size() >= 512)
 	{
 		char filename_1[1024];
 		sprintf(filename_1, "%s-1", filename);
-		sprintf(message, "DirectIO: Starting writing to file %s.", filename_1);
+		sprintf(message, "Thread %d: DirectIO writing to file %s.", thread, filename_1);
 		log_progress(message);
 
 		int fd = open(filename_1, O_RDWR | O_CREAT | O_DIRECT | O_TRUNC, 0644);
 		// DirectIO buffer, 512 is block size, 51200 is buffer size for 512 records
-		int i, j, base;
-		char record[100];	// each record is 100 byte
-		char buffer[51200];	// 512 records = 51200 bytes
 		void *temp = memalign(512, 51200);
 		while (q->size() >=512)
 		{
 			base = 0;
 			for (i=0; i<512; i++)	// Get 512 records at a time
 			{
-				memcpy(record, q->top().m_data, 100);
-				for (j=0; j<100; j++)
-				{
-					buffer[base] = record[j];
-					base++;
-				}
+				base = i * 100;
+				memcpy(buffer+base, q->top().m_data, 100);
 				q->pop();
 			}
 			memcpy(temp, buffer, 51200);
@@ -535,7 +534,7 @@ void save_queue_to_file_direct_io(std::priority_queue<SortRecord> *q, char* file
 		free(temp);
 		close(fd);
 
-		sprintf(message, "DirectIO: Closing file %s.", filename_1);
+		sprintf(message, "Thread %d: DirectIO closing file %s.", thread, filename_1);
 		log_progress(message);
 	}
 
@@ -544,16 +543,20 @@ void save_queue_to_file_direct_io(std::priority_queue<SortRecord> *q, char* file
 	{
 		char filename_2[1024];
 		sprintf(filename_2, "%s-2", filename);
-		sprintf(message, "BufferIO: Starting writing to file %s.", filename_2);
+		sprintf(message, "Thread %d: BufferIO writing to file %s.", thread, filename_2);
 		log_progress(message);
 		std::ofstream outfile (filename_2,std::ofstream::binary);
+		i = 0;
 		while(!q->empty()) 
 		{
-			outfile.write (q->top().m_data, 100);
+			base = i * 100;
+			memcpy(buffer+base, q->top().m_data, 100);
 			q->pop();
+			i++;
 		}
+		outfile.write (buffer, i*100);
 		outfile.close();
-		sprintf(message, "BufferIO: Closing file %s.", filename_2);
+		sprintf(message, "Thread %d: BufferIO closing file %s.", thread, filename_2);
 		log_progress(message);
 	}
 }
@@ -566,7 +569,7 @@ void save_queue_to_file_direct_io(std::priority_queue<SortRecord> *q, char* file
  *
  */
 
-void merge_temp_files_and_save(char* dir, char* output_file)
+void merge_temp_files_and_save(char* dir, char* output_file, int thread)
 {
 	DIR *dpdf;
 	struct dirent *epdf;
@@ -582,7 +585,7 @@ void merge_temp_files_and_save(char* dir, char* output_file)
 			if ((strcmp(epdf->d_name, ".") && strcmp(epdf->d_name, "..")))
 			{
 				sprintf(filename_string, "%s/%s",dir, epdf->d_name);
-				sprintf(message, "Main: Merging intermediate records from %s.", filename_string);
+				sprintf(message, "Thread %d: Merging intermediate records from %s.", thread, filename_string);
 				log_progress(message);
 				load_temp_file_to_queue(&q, filename_string);
 			}
@@ -590,10 +593,10 @@ void merge_temp_files_and_save(char* dir, char* output_file)
 	}
 
 	// Save merged results to the final output file
-	sprintf(message, "Main: Saving sorted results to output file %s-*.", output_file);
+	sprintf(message, "Thread %d: Saving sorted results to output file %s-*.", thread, output_file);
 	log_progress(message);
-	save_queue_to_file_buffer_io(&q, output_file);
-	sprintf(message, "Main: Output file %s-* has been written to disk.", output_file);
+	save_queue_to_file_direct_io(&q, output_file, thread);
+	sprintf(message, "Thread %d: Output file %s-* has been written to disk.", thread, output_file);
 	log_progress(message);
 }
 
@@ -630,7 +633,7 @@ void load_temp_file_to_queue(std::priority_queue<SortRecord> *q, char* filename)
 			start = 100*i;
 			// Create a SortRecord
 			SortRecord sr;
-			for (j=0; j<100; j++)	sr.m_data[j] = buffer[start+j];
+			memcpy(sr.m_data, buffer+start, 100);
 			q->push(sr);
 		}
 

@@ -21,7 +21,10 @@ using namespace std;
 // An array of SortServer
 int totalServers = 0;
 int hashBar = 0;
+int BufferSize = 1000;
 std::vector<int> SortServers;
+char** SendBuffers;
+int SendBufferCounters[65535];
 
 int open_connection(char* host, int port)
 {
@@ -82,6 +85,12 @@ void initialize()
 		cout << "Server: " << server << "\tPort: " << port << "\n";
 		totalServers++;
 	}
+	SendBuffers = new char * [totalServers];
+	for (int i=0; i<totalServers; i++)
+	{
+		SendBuffers[i] = new char[100*BufferSize];
+		SendBufferCounters[i] = 0;
+	}
 }
 
 int send_file(char* filename)
@@ -90,16 +99,6 @@ int send_file(char* filename)
 	int key, target;	
 	char record[100];
 
-	ifstream in(filename, ifstream::in | ios::binary);
-	while (!in.eof())
-	{  
-		in.read(record, 100);
-		key = (unsigned char) record[0];
-		target = floor(key/hashBar);
-		write(SortServers.at(target), record, 100);
-	}
-	in.close();
-/*
 	ifstream in(filename, ifstream::in | ios::binary);
 	if (in)	// the file was open successfully
 	{
@@ -115,26 +114,42 @@ int send_file(char* filename)
 		in.close();
 
 		// We know that each record is 100 bytes 
+		int i;
 		int count = size / 100;
 		char record[100];
-		for (int i=0; i<count; i++)
+		for (i=0; i<count; i++)
 		{
+/*		
 			int start = 100*i;
-			for (int j=0; j<100; j++)
-			{
-				record[j] = buffer[start+j];
-			}
+			memcpy(&record, buffer+start, 100);
 			int key = (unsigned char) record[0];
 			int target = floor(key/hashBar);
 			write(SortServers.at(target), record, 100);
+*/
+			int start = 100*i;
+			int key = (unsigned char) buffer[start];
+			int target = floor(key/hashBar);
+			memcpy(SendBuffers[target] + 100*SendBufferCounters[target], buffer+start, 100);
+			SendBufferCounters[target] = SendBufferCounters[target] + 1;
+			if (SendBufferCounters[target] == BufferSize)	// Buffer full
+			{
+				write(SortServers.at(target), SendBuffers[target], 100*BufferSize);
+				SendBufferCounters[target] = 0;
+			}
+		}
+		
+		// Send all the remaining content in buffer
+		for (i=0; i<totalServers; i++)
+		{
+			if (SendBufferCounters[i] > 0)
+			{
+				write(SortServers.at(i), SendBuffers[i], 100*SendBufferCounters[i]);
+			}
 		}
 
 		// free the memory being used by the file buffer
 		delete[] buffer;
-
 	}
-*/
-
 }
 
 int send_exit_signal()
@@ -154,7 +169,6 @@ int main(int argc, char* argv[])
 	hashBar = ceil(256 / totalServers);
 	cout << "Total Servers: " << totalServers << "\n";
 	cout << "Hash Bar: " << hashBar << "\n";	
-	
 	// Get a list of data files to send, this list is in a text file with the filename in argv[1]
 	std::ifstream conf_file(argv[1]);
 	char line[1024];
