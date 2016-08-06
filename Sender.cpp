@@ -119,7 +119,7 @@ int send_file(char* filename)
 		for (i=0; i<count; i++)
 		{
 			int start = 100*i;
-			int key = (unsigned char) buffer[start] * (unsigned char) buffer[start+1];
+			int key = ((unsigned char) buffer[start] * 256) + (unsigned char) buffer[start+1];
 			int target = floor(key/hashBar);
 			{
 				if (target >= totalServers)
@@ -142,6 +142,7 @@ int send_file(char* filename)
 			if (SendBufferCounters[i] > 0)
 			{
 				write(SortServers[i], SendBuffers[i], 100*SendBufferCounters[i]);
+				SendBufferCounters[i] = 0;
 			}
 		}
 
