@@ -15,6 +15,7 @@ int main(int argc, char* argv[])
 	{
 		// Validate one output file
 		sprintf(command, "valsort -o %s-%04d.sum %s-%04d", prefix, i, prefix, i);
+		cout << "\n" << command << "\n";
 		system(command);
 		// Merge to the final summary file
 		sprintf(command, "cat %s-%04d.sum >> %s-all.sum", prefix, i, prefix);
