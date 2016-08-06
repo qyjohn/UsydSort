@@ -18,13 +18,13 @@
 #include <math.h>
 using namespace std;
 
-// An array of SortServer
 int totalServers = 0;
-int hashBar = 0;
+float hashBar = 0;
 int BufferSize = 1000;
-std::vector<int> SortServers;
 char** SendBuffers;
 int SendBufferCounters[65535];
+int SortServers[65535];
+int start_port, threads_per_server;
 
 int open_connection(char* host, int port)
 {
@@ -72,18 +72,17 @@ void initialize()
 	// Get a list of SortServer from servers.cfg
 	// This is a global configuration file for all Sender
 	std::ifstream conf_file("servers.cfg");
-	char line[1024];
-	while (conf_file.getline(line, 1024))
+	char server[1024];
+	while (conf_file.getline(server, 1024))
 	{
-		char* server = strtok(line, ":");
-		int port = atoi(strtok(NULL, ":"));
-		
-		// Create a socket connection to the SortServer
-		int socket = open_connection(server, port);
-		// Add the socket to the vector
-		SortServers.push_back(socket);
-		cout << "Server: " << server << "\tPort: " << port << "\n";
-		totalServers++;
+		for (int i=0; i<threads_per_server; i++)
+		{
+			int port = start_port + i;
+			int socket = open_connection(server, port);
+			SortServers[totalServers] = socket;
+			cout << "Server: " << server << "\tPort: " << port << "\tSocket: " << SortServers[totalServers] << "\n";
+			totalServers++;
+		}
 	}
 	SendBuffers = new char * [totalServers];
 	for (int i=0; i<totalServers; i++)
@@ -119,21 +118,20 @@ int send_file(char* filename)
 		char record[100];
 		for (i=0; i<count; i++)
 		{
-/*		
 			int start = 100*i;
-			memcpy(&record, buffer+start, 100);
-			int key = (unsigned char) record[0];
+			int key = (unsigned char) buffer[start] * (unsigned char) buffer[start+1];
 			int target = floor(key/hashBar);
-			write(SortServers.at(target), record, 100);
-*/
-			int start = 100*i;
-			int key = (unsigned char) buffer[start];
-			int target = floor(key/hashBar);
+			{
+				if (target >= totalServers)
+				{
+					target = totalServers - 1;
+				}
+			}
 			memcpy(SendBuffers[target] + 100*SendBufferCounters[target], buffer+start, 100);
 			SendBufferCounters[target] = SendBufferCounters[target] + 1;
 			if (SendBufferCounters[target] == BufferSize)	// Buffer full
 			{
-				write(SortServers.at(target), SendBuffers[target], 100*BufferSize);
+				write(SortServers[target], SendBuffers[target], 100*BufferSize);
 				SendBufferCounters[target] = 0;
 			}
 		}
@@ -143,7 +141,7 @@ int send_file(char* filename)
 		{
 			if (SendBufferCounters[i] > 0)
 			{
-				write(SortServers.at(i), SendBuffers[i], 100*SendBufferCounters[i]);
+				write(SortServers[i], SendBuffers[i], 100*SendBufferCounters[i]);
 			}
 		}
 
@@ -158,15 +156,19 @@ int send_exit_signal()
 	string exit_string = "EXIT";
 	for (int i=0; i< totalServers; i++)
 	{
-		write(SortServers.at(i), exit_string.c_str(), 4);
+		write(SortServers[i], exit_string.c_str(), 4);
 	}
 }
 
 int main(int argc, char* argv[])
 {    
+	time_t current_time;
+	start_port = atoi(argv[2]);
+	threads_per_server = atoi(argv[3]);
+
 	// Get a list of SortServer from servers.cfg and create socket connections
 	initialize();
-	hashBar = ceil(256 / totalServers);
+	hashBar = 65536 / totalServers;
 	cout << "Total Servers: " << totalServers << "\n";
 	cout << "Hash Bar: " << hashBar << "\n";	
 	// Get a list of data files to send, this list is in a text file with the filename in argv[1]
@@ -175,11 +177,14 @@ int main(int argc, char* argv[])
 	// Send the data to SortServer, one file by one file
 	while (conf_file.getline(line, 1024))
 	{
-		cout << "File: " << line << "\n";
+		time(&current_time);
+		cout << current_time << " File: " << line << "\n";
 		send_file(line);
 	}
 
 	// Send EXIT signal to SortServer
 	send_exit_signal();
+	time(&current_time);
+	cout << current_time << " Done\n";
 }
 
