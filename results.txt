@@ -1,0 +1,26 @@
+2016-08-07 Tests
+MultiServerQ Single Node
+Batch threads save every 1,000,000 records to file.
+
+Threads, Senders, Data Size, Start, End, Total
+
+DirectIO
+
+32,  2, 100 GB, 7761, 8121, 360 s
+32,  2, 100 GB, 8174, 8481, 307 s
+32,  2, 100 GB, 8522, 8826, 304 s
+64,  2, 100 GB, 7640, 8103, 463 s
+64,  2, 100 GB, 8569, 8949, 380 s
+64,  2, 100 GB, 9077, 9495, 418 s
+128, 2, 100 GB, 2716, 3306, 590 s
+128, 2, 100 GB, 5835, 6522, 687 s
+128, 2, 100 GB, 7064, 7671, 607 s
+
+32,  4, 200 GB, 5926, , s (core dump due to insufficient memory)
+
+
+BufferIO
+
+64,  2, 100 GB, 0053, 0728, 675 s
+64,  2, 100 GB, 0793, 1469, 676 s
+64,  2, 100 GB, 1550, 2244, 694 s

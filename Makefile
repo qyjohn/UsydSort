@@ -5,3 +5,4 @@ all:
 	g++ -std=c++11 Sender.cpp -o bin/Sender
 	g++ -std=c++11 GenBatch.cpp -o bin/GenBatch
 	g++ -std=c++11 Validate.cpp -o bin/Validate
+	g++ -std=c++11 Test.cpp -o bin/Test
