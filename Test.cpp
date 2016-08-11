@@ -17,14 +17,30 @@
 #include <fcntl.h>
 #include <malloc.h>
 #include <math.h>
+#include <unordered_map>
 
 using namespace std;
 
+class Foo
+{
+	public:
+	std::unordered_map<std::string, std::string> map;
+};
+
+Foo* create_foo();
+
+Foo* create_foo()
+{
+	Foo *f = new Foo();
+	return f;
+}
+
 int main(int argc, char* argv[])
 {
-	int threads = 128;
-	unsigned concurentThreadsSupported = std::thread::hardware_concurrency();
-	int batch = (int) (threads / concurentThreadsSupported);
-	
-	cout << "Batches: " << batch << "\n";
+	Foo *f = create_foo();
+	f->map["key1"]="value1";
+	f->map["key2"]="value2";
+
+	cout << f->map["key1"] << "\n";
+	cout << f->map["key2"] << "\n";
 }

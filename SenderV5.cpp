@@ -18,13 +18,13 @@
 #include <math.h>
 using namespace std;
 
+int port = 2000;
 int totalServers = 0;
 float hashBar = 0;
 int BufferSize = 1000;
 char** SendBuffers;
 int SendBufferCounters[65535];
 int SortServers[65535];
-int start_port, threads_per_server;
 
 int open_connection(char* host, int port)
 {
@@ -75,14 +75,10 @@ void initialize()
 	char server[1024];
 	while (conf_file.getline(server, 1024))
 	{
-		for (int i=0; i<threads_per_server; i++)
-		{
-			int port = start_port + i;
-			int socket = open_connection(server, port);
-			SortServers[totalServers] = socket;
-			cout << "Server: " << server << "\tPort: " << port << "\tSocket: " << SortServers[totalServers] << "\n";
-			totalServers++;
-		}
+		int socket = open_connection(server, port);
+		SortServers[totalServers] = socket;
+		cout << "Server: " << server << "\tPort: " << port << "\tSocket: " << SortServers[totalServers] << "\n";
+		totalServers++;
 	}
 	SendBuffers = new char * [totalServers];
 	for (int i=0; i<totalServers; i++)
@@ -164,8 +160,7 @@ int send_exit_signal()
 int main(int argc, char* argv[])
 {    
 	time_t current_time;
-	start_port = atoi(argv[2]);
-	threads_per_server = atoi(argv[3]);
+	port = atoi(argv[2]);
 
 	// Get a list of SortServer from servers.cfg and create socket connections
 	initialize();
