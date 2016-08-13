@@ -1,3 +1,17 @@
+2016-08-13
+
+partition_factor = 4, in_memory_factor = 2 => 4 x 32 = 128 partitions with 64 partitions in memory
+
+MultiServerV5 1 0 2020 4 2 0 /data/Test-03
+
+DirectIO 1 nodes x 100 GB 677 s
+
+MultiServerV5 2 0 2020 4 2 0 /data/Test-03
+
+DirectIO 2 nodes x 100 GB 529 s
+
+
+
 2016-08-11
 
 MultiServerV5
