@@ -5,11 +5,14 @@
 #include <netdb.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <dirent.h>
 #include <netinet/in.h>
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <iomanip>
+#include <queue>
 #include <strings.h>
 #include <stdlib.h>
 #include <string>
@@ -25,6 +28,22 @@ int BufferSize = 1000;
 char** SendBuffers;
 int SendBufferCounters[65535];
 int SortServers[65535];
+
+
+int is_regular_file(char *path)
+{
+	struct stat path_stat;
+	stat(path, &path_stat);
+	return S_ISREG(path_stat.st_mode);
+}
+
+int is_directory(char *path) 
+{
+	struct stat statbuf;
+	if (stat(path, &statbuf) != 0)
+		return 0;
+	return S_ISDIR(statbuf.st_mode);
+}
 
 int open_connection(char* host, int port)
 {
@@ -88,7 +107,7 @@ void initialize()
 	}
 }
 
-int send_file(char* filename)
+int send_file(const char* filename)
 {
 	// create an ifstream from the file
 	int key, target;	
@@ -167,20 +186,61 @@ int main(int argc, char* argv[])
 	hashBar = 65536 / totalServers;
 	cout << "Total Servers: " << totalServers << "\n";
 	cout << "Hash Bar: " << hashBar << "\n";	
-	// Get a list of data files to send, this list is in a text file with the filename in argv[1]
-	std::ifstream conf_file(argv[1]);
-	char line[1024];
-	// Send the data to SortServer, one file by one file
-	while (conf_file.getline(line, 1024))
+
+	std::vector<std::string> files;
+	// Check if argv[1] is a file or a folder
+	if (is_directory(argv[1]))
+	{
+		DIR *dpdf;
+		struct dirent *epdf;
+		dpdf = opendir(argv[1]);
+		char temp[1024];
+		// Get a list of the files in the work folder, sorted by filename
+		if (dpdf != NULL)
+		{
+			// Load data from all the files in the temporary directory
+			while (epdf = readdir(dpdf))
+			{
+				if (epdf->d_type != DT_DIR)
+				{
+					sprintf(temp, "%s/%s", argv[1], epdf->d_name);
+					std::string filename = temp;
+					files.push_back(filename);
+				}
+			}
+		}
+	
+	}
+	// Otherwise check if argv[1] is a regular file
+	else if (is_regular_file(argv[1]))
+	{
+		// Get a list of data files to send, this list is in a text file with the filename in argv[1]
+		std::ifstream conf_file(argv[1]);
+		char line[1024];
+		// Send the data to SortServer, one file by one file
+		while (conf_file.getline(line, 1024))
+		{
+			std::string filename = line;
+			files.push_back(filename);
+		}
+	}
+	
+	std::make_heap(files.begin(), files.end());
+	std::sort_heap(files.begin(), files.end());
+
+	// Send files
+	int count = files.size();
+	for (int i=0; i<count; i++)
 	{
 		time(&current_time);
-		cout << current_time << " File: " << line << "\n";
-		send_file(line);
+		cout << current_time << " File: " << files[i] << "\n";
+		send_file(files[i].c_str());
 	}
-
+	
 	// Send EXIT signal to SortServer
 	send_exit_signal();
 	time(&current_time);
 	cout << current_time << " Done\n";
 }
+
 

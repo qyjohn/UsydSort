@@ -1,5 +1,5 @@
 /*
- *  MultiServerV5 <total_nodes> <node_id> <server_port> <partition_factor> <io_mode> <work_folder>
+ *  MultiServerV5 <total_nodes> <node_id> <server_port> <partition_factor> <in_memory_factor> <io_mode> <work_folder>
  *
  */
 
@@ -57,6 +57,14 @@ class SortRecordQueue
 	bool empty()    {return q.empty();}
 };
 
+void *save_intermediate_data_thread(void *args);
+struct save_intermediate_thread_args
+{
+	char filename[1024];
+	char *buffer;
+	int  size;
+};
+
 class IntermediateBuffer
 {
 	public:
@@ -84,6 +92,19 @@ class IntermediateBuffer
 		
 		if (record_counter == buffer_size)
 		{
+/*
+			struct save_intermediate_thread_args args;
+			sprintf(args.filename, "%s/%04d/%04d", work_folder, partition_id, file_counter);
+			args.buffer = buffer;
+			args.size   = buffer_size;
+			pthread_t myThread;
+			pthread_create(&myThread, NULL, save_intermediate_data_thread, (void*) &args); 
+
+			buffer = new char[100*buffer_size];
+			file_counter++;
+			record_counter = 0;
+*/
+
 			sprintf(filename, "%s/%04d/%04d", work_folder, partition_id, file_counter);
 			std::ofstream outfile(filename,std::ofstream::binary);
 			outfile.write (buffer, 100*buffer_size);
@@ -98,7 +119,6 @@ class IntermediateBuffer
 	
 	void final_save_buffer()
 	{
-		cout << "Partition: " << partition_id << " Records: " << record_counter << "\n";
 		if (record_counter > 0)
 		{
 			sprintf(filename, "%s/%04d/%04d", work_folder, partition_id, file_counter);
@@ -107,6 +127,17 @@ class IntermediateBuffer
 			outfile.close();
 
 			delete[] buffer;
+
+/*
+			struct save_intermediate_thread_args args;
+			sprintf(args.filename, "%s/%04d/%04d", work_folder, partition_id, file_counter);
+			args.buffer = buffer;
+			args.size   = 100*record_counter;
+			pthread_t myThread;
+			pthread_create(&myThread, NULL, save_intermediate_data_thread, (void*) &args); 
+			pthread_join(myThread, NULL);
+			buffer = NULL;
+*/
 		}
 	}
 };
@@ -124,7 +155,6 @@ void load_temp_file_to_queue(std::priority_queue<SortRecord> *q, char* filename)
 
 time_t current_time;
 char message[1024];
-int reserved_cpu_core = 0;
 
 struct server_thread_args
 {
@@ -140,6 +170,8 @@ struct server_thread_args
 	int cpu_cores;
 	// Local data partition
 	int partitions;
+	// In memory partitions
+	int in_memory;
 	// IO mode, 0 - DirectIO, 1 - BufferIO
 	int io_mode;
 	// Hash bar for each partition
@@ -164,9 +196,12 @@ struct save_data_thread_args
 	int io_mode;
 	int cpu_cores;
 	int partition_factor;
+	int in_memory_factor;
 	char *work_folder;
 	SortRecordQueue *queue;
 };
+
+
 
 /**
  * UsydSoft - MultiServer V5
@@ -199,31 +234,33 @@ int main(int argc, char* argv[])
 	int node_id          = atoi(argv[2]); // the id of this node
 	int port_no          = atoi(argv[3]); // server port
 	int partition_factor = atoi(argv[4]); // local partitions = partition_factor x cpu_cores 
-	int io_mode          = atoi(argv[5]); // 0 is DirectIO, 1 is BufferIO
-	char *work_folder    = argv[6];
+	int in_memory_factor = atoi(argv[5]); // in-memory partitions = in_memory_factor x cpu_cores, this also determines the number of threads in the save data phase
+	int io_mode          = atoi(argv[6]); // 0 is DirectIO, 1 is BufferIO
+	char *work_folder    = argv[7];
 	
 	// Get the number of CPU cores
 	unsigned cpu_cores = std::thread::hardware_concurrency();
 	int partitions = partition_factor * cpu_cores;
-	// No matter how many partitions we have, we only create N = cpu_cores SortRecordQueue for 
+	int in_memory  = in_memory_factor * cpu_cores;
+	// No matter how many partitions we have, we only create N = cpu_cores x in_memory_factor SortRecordQueue for 
 	// in-memory storage. Data for other partitions are considered as intermediate data and we store
 	// them on to disk immediately for further read-sort-write.
 	int hash_bar = floor (65536 / (total_nodes * partitions));
 	int lower_range = floor(65535 * node_id / total_nodes);
-	SortRecordQueue queues[cpu_cores];
+	SortRecordQueue queues[in_memory];
 	std::vector<SortRecordQueue> sr_queues;
-	for (i=0; i<cpu_cores; i++)
+	for (i=0; i<in_memory; i++)
 	{
 		sr_queues.push_back(queues[i]);
 	} 
 
 	// Now, create the IntermediateBuffer for intermediate data set
-	IntermediateBuffer buffers[partitions - cpu_cores];
+	IntermediateBuffer buffers[partitions - in_memory];
 	std::vector<IntermediateBuffer> sr_buffers;
-	for (i=cpu_cores; i<partitions; i++)
+	for (i=in_memory; i<partitions; i++)
 	{
-		buffers[i-cpu_cores].initialize(i, work_folder);
-		sr_buffers.push_back(buffers[i-cpu_cores]);
+		buffers[i-in_memory].initialize(i, work_folder);
+		sr_buffers.push_back(buffers[i-in_memory]);
 	} 
 
 	cout << "1\n";
@@ -235,6 +272,7 @@ int main(int argc, char* argv[])
 	args.port_no     = port_no;
 	args.cpu_cores   = cpu_cores;
 	args.partitions  = partitions;
+	args.in_memory   = in_memory;
 	args.io_mode     = io_mode;
 	args.work_folder = work_folder;
 	args.lower_range = lower_range;
@@ -250,7 +288,7 @@ int main(int argc, char* argv[])
 	system(command);
 
 	// Creating the necessary folder, file handle and counter for intermediate partitions
-	for (i=cpu_cores; i<partitions; i++)
+	for (i=in_memory; i<partitions; i++)
 	{
 		sprintf(command, "exec mkdir -p %s/%04d", work_folder, i);
 		system(command);
@@ -261,25 +299,26 @@ int main(int argc, char* argv[])
 	pthread_join(sort_server_thread, NULL);
 	
 	// Flush all the intermediate data to disk
-	for (i=cpu_cores; i<partitions; i++)
+	for (i=in_memory; i<partitions; i++)
 	{
-		sr_buffers[i-cpu_cores].final_save_buffer();
+		sr_buffers[i-in_memory].final_save_buffer();
 	} 
 
 	// Now, launch N threads to save the data to disk, N = cpu_cores
-	pthread_t save_data_threads[cpu_cores];
-	struct save_data_thread_args save_args[cpu_cores];
-	for (i=0; i<cpu_cores; i++)
+	pthread_t save_data_threads[in_memory];
+	struct save_data_thread_args save_args[in_memory];
+	for (i=0; i<in_memory; i++)
 	{
 		save_args[i].thread_id = i;
 		save_args[i].io_mode   = io_mode;
 		save_args[i].cpu_cores = cpu_cores;
 		save_args[i].partition_factor = partition_factor;
+		save_args[i].in_memory_factor = in_memory_factor;
 		save_args[i].queue = &sr_queues[i];
 		save_args[i].work_folder = work_folder;
 		pthread_create(&save_data_threads[i], NULL, save_data_thread, (void*) &save_args[i]); 
 	}
-	for (i=0; i<cpu_cores; i++)
+	for (i=0; i<in_memory; i++)
 	{
 		pthread_join(save_data_threads[i], NULL);
 	}
@@ -415,6 +454,7 @@ void *sort_thread (void *args)
 	int hash_bar    = server_args->hash_bar;
 	int lower_range = server_args->lower_range;
 	int partitions  = server_args->partitions;
+	int in_memory   = server_args->in_memory;
 	std::vector<SortRecordQueue> *sr_queues = server_args->sr_queues;
 	std::vector<IntermediateBuffer> *sr_buffers = server_args->sr_buffers;
 
@@ -455,7 +495,7 @@ void *sort_thread (void *args)
 				partition = partitions - 1;
 			}
 
-			if (partition < cpu_cores)	// In memory
+			if (partition < in_memory)	// In memory
 			{
 				// Create a SortRecord
 				SortRecord sr;
@@ -466,7 +506,7 @@ void *sort_thread (void *args)
 			{
 				// Push the data into inermediate queue
 				memcpy(temp, buffer + 100*i, 100);
-				sr_buffers->at(partition-cpu_cores).add_record(temp);
+				sr_buffers->at(partition-in_memory).add_record(temp);
 			}
 		}
 
@@ -491,6 +531,7 @@ void *save_data_thread (void *args)
 	int io_mode = myArgs->io_mode;
 	int cpu_cores = myArgs->cpu_cores;
 	int partition_factor = myArgs->partition_factor;
+	int in_memory_factor = myArgs->in_memory_factor;
 	SortRecordQueue *queue = myArgs->queue;
 	char* work_folder = myArgs->work_folder;
 	char folder[1024];
@@ -507,14 +548,33 @@ void *save_data_thread (void *args)
 	}
 
 	// Also, need to work in the intermediate data set 
-	for (int i=1; i<partition_factor; i++)
+	for (int i=1; i<partition_factor/in_memory_factor; i++)
 	{
-		int partition_id = i*cpu_cores + thread_id;
+		int partition_id = i*cpu_cores*in_memory_factor + thread_id;
 		sprintf(folder, "%s/%04d", work_folder, partition_id);
 		sprintf(filename, "%s/%05d.out", work_folder, partition_id);
 		merge_temp_files_and_save(folder, filename, io_mode);
 	}
 
+}
+
+void *save_intermediate_data_thread(void *args)
+{
+	// Get filename and buffer
+	struct save_intermediate_thread_args *myArgs = (struct save_intermediate_thread_args*) args;
+	char* filename = myArgs->filename;
+	char* buffer   = myArgs->buffer;
+	int size     = myArgs->size;
+
+	// Write buffer to file
+	std::ofstream outfile(filename,std::ofstream::binary);
+	outfile.write (buffer, size);
+	outfile.close();
+
+	cout << filename << "Delete buffer\n";
+	// Free the memory
+	delete[] buffer;
+	cout << filename << "Done\n";
 }
 
 /**
@@ -568,7 +628,7 @@ void save_queue_to_file_buffer_io(std::priority_queue<SortRecord> *q, char* file
 void save_queue_to_file_direct_io(std::priority_queue<SortRecord> *q, char* filename)
 {
 	int i, j, base;
-	char buffer[51200];	// 512 records = 51200 bytes
+	char* buffer = new char[51200];	// 512 records = 51200 bytes
 
 	// Use DirectIO to save data in 512 record blocks
 	if (q->size() >= 512)
@@ -621,6 +681,8 @@ void save_queue_to_file_direct_io(std::priority_queue<SortRecord> *q, char* file
 		sprintf(message, "BufferIO closing file %s.", filename_2);
 		log_progress(message);
 	}
+	
+	delete[] buffer;
 }
 
 

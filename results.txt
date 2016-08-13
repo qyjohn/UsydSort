@@ -1,4 +1,18 @@
-2016-08-07 Tests
+2016-08-11
+
+MultiServerV5
+SenderV5
+MultiServerV5 1 0 2020 2 0 /data/Test-03
+SenderV5 test_02.batch 2020
+
+BufferIO 1 nodes x 100 GB 1392 s
+DirectIO 1 nodes x 100 GB 710 s
+DirectIO 2 nodes x 100 GB 553 s
+
+
+
+2016-08-07
+
 MultiServerQ Single Node
 Batch threads save every 1,000,000 records to file.
 

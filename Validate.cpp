@@ -29,13 +29,10 @@ int main(int argc, char* argv[])
 		// Load data from all the files in the temporary directory
 		while (epdf = readdir(dpdf))
 		{
-			if ((strcmp(epdf->d_name, ".") && strcmp(epdf->d_name, "..")))
+			if (epdf->d_type != DT_DIR)
 			{
-				if (epdf->d_type != DT_DIR)
-				{
-					std::string filename = epdf->d_name;
-					files.push_back(filename);
-				}
+				std::string filename = epdf->d_name;
+				files.push_back(filename);
 			}
 		}
 	}

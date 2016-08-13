@@ -35,12 +35,30 @@ Foo* create_foo()
 	return f;
 }
 
+char* create_buffer()
+{
+	char *buffer = new char[1024];
+	return buffer;
+}
+
+void print_content(char* t)
+{
+	cout << t ;
+	delete[] t;
+}
+
 int main(int argc, char* argv[])
 {
-	Foo *f = create_foo();
+/*	Foo *f = create_foo();
 	f->map["key1"]="value1";
 	f->map["key2"]="value2";
 
 	cout << f->map["key1"] << "\n";
 	cout << f->map["key2"] << "\n";
+*/
+
+	char* buffer = create_buffer();
+	sprintf(buffer, "This is a quick test\n");
+	char* t = buffer;
+	print_content(t);
 }
