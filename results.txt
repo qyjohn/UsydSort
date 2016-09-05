@@ -5,8 +5,9 @@ DirectIO 1 nodes x 100 GB 654 s
 MultiServerV5 1 0 2000 2 1 1 /data/Test		(2x partitions, 1x in memory)	654 s
 MultiServerV5 1 0 2000 10 5 1 /data/Test	(10x partitions, 5x in memory)	666 s
 
-485 input files each node
-2 nodes, 
+450 input files each node
+2 nodes, killed during sorting the intermediate data set.
+
 
 
 2016-08-13
