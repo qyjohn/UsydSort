@@ -1,3 +1,11 @@
+/**
+ *
+ * Usage:
+ *
+ * SendV5 <batch_file_name | data_folder_name> <port> [optional_record_size]
+ *
+ */
+
 #include <string.h>
 #include <cstring>
 #include <unistd.h>

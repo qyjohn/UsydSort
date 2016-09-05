@@ -24,6 +24,8 @@
 #include <math.h>
 
 using namespace std;
+//int RecordSize = 100;	// By default, 100 bytes per record
+
 
 class SortRecord
 {
@@ -55,6 +57,24 @@ class SortRecordQueue
 	void pop()      {q.pop();}
 	size_t size()   {return q.size();}
 	bool empty()    {return q.empty();}
+};
+
+class IntermediateQueue
+{
+	public:
+	std::vector<int> v;
+	pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+
+	int pop_back()
+	{
+		pthread_mutex_lock(&mutex);
+		int i = v.back();
+		v.pop_back();
+		pthread_mutex_unlock(&mutex);
+		return i;
+	}
+	
+	bool empty() {return v.empty();}	
 };
 
 void *save_intermediate_data_thread(void *args);
