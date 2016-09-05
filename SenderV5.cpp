@@ -24,10 +24,11 @@ using namespace std;
 int port = 2000;
 int totalServers = 0;
 float hashBar = 0;
-int BufferSize = 1000;
+int RecordSize = 100;	// By default, 100 bytes per record
+int BufferSize = 1000;	// Only flush every 1000 records at a time (for maximum bandwith utilization)
 char** SendBuffers;
-int SendBufferCounters[65535];
-int SortServers[65535];
+int SendBufferCounters[65535];	
+int SortServers[65535];	// Socket connections to the sort servers
 
 
 int is_regular_file(char *path)
@@ -102,7 +103,7 @@ void initialize()
 	SendBuffers = new char * [totalServers];
 	for (int i=0; i<totalServers; i++)
 	{
-		SendBuffers[i] = new char[100*BufferSize];
+		SendBuffers[i] = new char[RecordSize*BufferSize];
 		SendBufferCounters[i] = 0;
 	}
 }
@@ -111,7 +112,7 @@ int send_file(const char* filename)
 {
 	// create an ifstream from the file
 	int key, target;	
-	char record[100];
+	char record[RecordSize];
 
 	ifstream in(filename, ifstream::in | ios::binary);
 	if (in)	// the file was open successfully
@@ -127,13 +128,13 @@ int send_file(const char* filename)
 		// Close the file
 		in.close();
 
-		// We know that each record is 100 bytes 
+		// We know that each record is RecordSize bytes 
 		int i;
-		int count = size / 100;
-		char record[100];
+		int count = size / RecordSize;
+		char record[RecordSize];
 		for (i=0; i<count; i++)
 		{
-			int start = 100*i;
+			int start = RecordSize*i;
 			int key = (unsigned char) buffer[start] * 256;
 			int target = floor(key/hashBar);
 			{
@@ -142,7 +143,7 @@ int send_file(const char* filename)
 					target = totalServers - 1;
 				}
 			}
-			memcpy(SendBuffers[target] + 100*SendBufferCounters[target], buffer+start, 100);
+			memcpy(SendBuffers[target] + RecordSize*SendBufferCounters[target], buffer+start, RecordSize);
 			SendBufferCounters[target] = SendBufferCounters[target] + 1;
 			if (SendBufferCounters[target] == BufferSize)	// Buffer full
 			{
@@ -156,7 +157,7 @@ int send_file(const char* filename)
 		{
 			if (SendBufferCounters[i] > 0)
 			{
-				write(SortServers[i], SendBuffers[i], 100*SendBufferCounters[i]);
+				write(SortServers[i], SendBuffers[i], RecordSize*SendBufferCounters[i]);
 				SendBufferCounters[i] = 0;
 			}
 		}
@@ -180,7 +181,13 @@ int main(int argc, char* argv[])
 {    
 	time_t current_time;
 	port = atoi(argv[2]);
-
+	
+	// If argv[3] is not empty, this is the none-default record size
+	if (argc == 4)
+	{
+		RecordSize = atoi(argv[3]);
+	}
+	
 	// Get a list of SortServer from servers.cfg and create socket connections
 	initialize();
 	hashBar = 65536 / totalServers;
