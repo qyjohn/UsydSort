@@ -6,6 +6,7 @@ all:
 	$(CC) $(CFLAGS) MultiServerV.cpp -lpthread -o bin/MultiServerV
 	$(CC) $(CFLAGS) MultiServerMultex.cpp -lpthread -o bin/MultiServerMultex
 	$(CC) $(CFLAGS) MultiServerV5.cpp -lpthread -o bin/MultiServerV5
+	$(CC) $(CFLAGS) MultiServerV6.cpp -lpthread -o bin/MultiServerV6
 	$(CC) $(CFLAGS) SortServer.cpp -lpthread -o bin/SortServer
 	g++ -std=c++11 Sender.cpp -o bin/Sender
 	g++ -std=c++11 SenderV5.cpp -o bin/SenderV5

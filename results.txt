@@ -1,5 +1,5 @@
 440 input files on each node, direct io
-
+2 nodes, 3113 seconds, data transfer 1979 seconds. File saving 1134 seconds.
 
 
 
