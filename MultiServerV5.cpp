@@ -112,19 +112,6 @@ class IntermediateBuffer
 		
 		if (record_counter == buffer_size)
 		{
-/*
-			struct save_intermediate_thread_args args;
-			sprintf(args.filename, "%s/%04d/%04d", work_folder, partition_id, file_counter);
-			args.buffer = buffer;
-			args.size   = buffer_size;
-			pthread_t myThread;
-			pthread_create(&myThread, NULL, save_intermediate_data_thread, (void*) &args); 
-
-			buffer = new char[100*buffer_size];
-			file_counter++;
-			record_counter = 0;
-*/
-
 			sprintf(filename, "%s/%04d/%04d", work_folder, partition_id, file_counter);
 			std::ofstream outfile(filename,std::ofstream::binary);
 			outfile.write (buffer, 100*buffer_size);
@@ -145,19 +132,7 @@ class IntermediateBuffer
 			std::ofstream outfile(filename,std::ofstream::binary);
 			outfile.write (buffer, 100*record_counter);
 			outfile.close();
-
 			delete[] buffer;
-
-/*
-			struct save_intermediate_thread_args args;
-			sprintf(args.filename, "%s/%04d/%04d", work_folder, partition_id, file_counter);
-			args.buffer = buffer;
-			args.size   = 100*record_counter;
-			pthread_t myThread;
-			pthread_create(&myThread, NULL, save_intermediate_data_thread, (void*) &args); 
-			pthread_join(myThread, NULL);
-			buffer = NULL;
-*/
 		}
 	}
 };
@@ -170,7 +145,7 @@ void *save_data_thread(void *args);
 bool test_exit(char* test);
 void save_queue_to_file_buffer_io(std::priority_queue<SortRecord> *q, char* filename);
 void save_queue_to_file_direct_io(std::priority_queue<SortRecord> *q, char* filename);
-void merge_temp_files_and_save(char* dir, char* output_file, int io_mode);
+void merge_temp_files_and_save(std::priority_queue<SortRecord> *q, char* dir, char* output_file, int io_mode);
 void load_temp_file_to_queue(std::priority_queue<SortRecord> *q, char* filename);
 
 time_t current_time;
@@ -573,7 +548,7 @@ void *save_data_thread (void *args)
 		int partition_id = i*cpu_cores*in_memory_factor + thread_id;
 		sprintf(folder, "%s/%04d", work_folder, partition_id);
 		sprintf(filename, "%s/%05d.out", work_folder, partition_id);
-		merge_temp_files_and_save(folder, filename, io_mode);
+		merge_temp_files_and_save(&queue->q, folder, filename, io_mode);
 	}
 
 }
@@ -713,12 +688,12 @@ void save_queue_to_file_direct_io(std::priority_queue<SortRecord> *q, char* file
  *
  */
 
-void merge_temp_files_and_save(char* dir, char* output_file, int io_mode)
+void merge_temp_files_and_save(std::priority_queue<SortRecord> *q, char* dir, char* output_file, int io_mode)
 {
 	DIR *dpdf;
 	struct dirent *epdf;
 	char filename_string[1024];
-	std::priority_queue<SortRecord> q;
+//	std::priority_queue<SortRecord> q;
 
 	dpdf = opendir(dir);
 	if (dpdf != NULL)
@@ -731,7 +706,7 @@ void merge_temp_files_and_save(char* dir, char* output_file, int io_mode)
 				sprintf(filename_string, "%s/%s",dir, epdf->d_name);
 //				sprintf(message, "Merging intermediate records from %s.", filename_string);
 //				log_progress(message);
-				load_temp_file_to_queue(&q, filename_string);
+				load_temp_file_to_queue(q, filename_string);
 			}
 		}
 	}
@@ -739,11 +714,11 @@ void merge_temp_files_and_save(char* dir, char* output_file, int io_mode)
 	// Save merged results to the final output file
 	if (io_mode == 0)
 	{
-		save_queue_to_file_direct_io(&q, output_file);
+		save_queue_to_file_direct_io(q, output_file);
 	}
 	else
 	{
-		save_queue_to_file_buffer_io(&q, output_file);	
+		save_queue_to_file_buffer_io(q, output_file);	
 	}
 }
 

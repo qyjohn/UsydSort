@@ -1,3 +1,8 @@
+440 input files on each node, direct io
+
+
+
+
 2016-09-05
 
 DirectIO 1 nodes x 100 GB 654 s
