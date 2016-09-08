@@ -61,12 +61,12 @@ class SortPartition
 		int partition_type;	// 0 is in-memory partition, 1 is on-disk (intermediate) partition
 		pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 		std::priority_queue<SortRecord> q;	
-		char *work_folder;
+		char* work_folder;
 		// The following parameters are used for intermediate partitions only
 		int buffer_size=1000000;
 		int record_counter = 0;
 		int file_counter   = 0;
-		char filename[1024];
+		char filename[1024], message[1024];
 		char *buffer;
 		
 		// Initialize the partition
@@ -128,11 +128,16 @@ class SortPartition
 		
 		void load_disk_data()
 		{
+			sprintf(message, "Loading intermediate partition %04d", partition_id);
+			log_progress(message);
+
 			DIR *dpdf;
 			struct dirent *epdf;
 			char filename_string[1024];
-		
-			dpdf = opendir(work_folder);
+			char load_folder[1024];
+
+			sprintf(load_folder, "%s/%04d", work_folder, partition_id);
+			dpdf = opendir(load_folder);
 			if (dpdf != NULL)
 			{
 				// Load data from all the files in the temporary directory
@@ -140,7 +145,7 @@ class SortPartition
 				{
 					if ((strcmp(epdf->d_name, ".") && strcmp(epdf->d_name, "..")))
 					{
-						sprintf(filename_string, "%s/%s", work_folder, epdf->d_name);
+						sprintf(filename_string, "%s/%s", load_folder, epdf->d_name);
 						load_temp_file(filename_string);
 					}
 				}
@@ -200,7 +205,7 @@ class SortPartition
 		void save_queue_to_file_direct_io(char* filename)
 		{
 			int i, j, base;
-			char* buffer = new char[51200];	// 512 records = 51200 bytes
+			char* local_buffer = new char[51200];	// 512 records = 51200 bytes
 		
 			// Use DirectIO to save data in 512 record blocks
 			if (q.size() >= 512)
@@ -217,10 +222,10 @@ class SortPartition
 					for (i=0; i<512; i++)	// Get 512 records at a time
 					{
 						base = i * 100;
-						memcpy(buffer+base, q.top().m_data, 100);
+						memcpy(local_buffer+base, q.top().m_data, 100);
 						q.pop();
 					}
-					memcpy(temp, buffer, 51200);
+					memcpy(temp, local_buffer, 51200);
 					write(fd, temp, 51200);
 				}
 				free(temp);
@@ -237,7 +242,7 @@ class SortPartition
 				while(!q.empty()) 
 				{
 					base = i * 100;
-					memcpy(buffer+base, q.top().m_data, 100);
+					memcpy(local_buffer+base, q.top().m_data, 100);
 					q.pop();
 					i++;
 				}
@@ -245,11 +250,16 @@ class SortPartition
 				outfile.close();
 			}
 			
-			delete[] buffer;
+			delete[] local_buffer;
 		}
 		
 		void flush_queue_to_disk(int io_mode)
 		{
+			sprintf(message, "Flushing partition %04d", partition_id);
+			log_progress(message);
+
+			char filename[1024];
+			sprintf(filename, "%s/%05d.out", work_folder, partition_id);
 			if (io_mode == 0)
 			{
 				save_queue_to_file_buffer_io(filename);
@@ -259,12 +269,19 @@ class SortPartition
 				save_queue_to_file_buffer_io(filename);
 			}
 		}
+
+		void log_progress(char* msg)
+		{
+			time_t current_time;
+			time(&current_time);
+			cout << current_time << "\t" << msg << "\n";
+		}
 		
 };
 
 /**
  *
- *
+ * SortDataPlan
  *
  *
  *
@@ -273,11 +290,11 @@ class SortPartition
 class SortDataPlan
 {
 	public:
-	int i, hash_bar, lower_range;
+	int i, hash_bar, lower_range, partitions_done;
 	int node_count, node_id, cpu_cores, total_partitions, in_memory_partitions, io_mode;
 	char *work_folder;
 	std::vector<SortPartition> partitions;
-	std::vector<int> partitions_to_save;
+	std::vector<int> partitions_to_flush, partitions_to_load;
 	pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 	void initialize(int count, int id, int cores, int total, int memory, char* folder, int mode)
@@ -292,6 +309,8 @@ class SortDataPlan
 		
 		hash_bar = floor (65536 / (node_count * total_partitions));
 		lower_range = floor(65535 * node_id / node_count);
+
+		partitions_done = 0;
 		
 		// Initialize all partitions
 		SortPartition all_partitions[total_partitions];
@@ -310,6 +329,70 @@ class SortDataPlan
 			partitions.push_back(all_partitions[i]);
 		} 
 	}
+
+	bool is_all_flushed()
+	{
+		if (partitions_done == total_partitions)
+		{
+			return true;
+		}
+		else
+		{
+			return false;
+		}
+	}
+
+	bool is_flush_queue_empty()
+	{
+		return partitions_to_flush.empty();
+	}
+
+	int get_partition_to_flush()
+	{
+		pthread_mutex_lock(&mutex);
+		int p;
+		if (partitions_to_flush.empty())
+		{
+			p = -1;
+		}
+		else
+		{
+			p = partitions_to_flush.back();
+			partitions_to_flush.pop_back();
+			partitions_done++;
+		}
+		pthread_mutex_unlock(&mutex);
+		return p;
+	}
+
+	bool is_load_queue_empty()
+	{
+		return partitions_to_load.empty();
+	}
+
+	int get_partition_to_load()
+	{
+		pthread_mutex_lock(&mutex);
+		int p;
+		if (partitions_to_load.empty())
+		{
+			p = -1;
+		}
+		else
+		{
+			p = partitions_to_load.back();
+			partitions_to_load.pop_back();
+		}
+		pthread_mutex_unlock(&mutex);
+		return p;
+	}
+
+	void add_partition_to_flush(int p)
+	{
+		pthread_mutex_lock(&mutex);
+		partitions_to_flush.push_back(p);
+		pthread_mutex_unlock(&mutex);
+	}
 	
 };
 
@@ -319,12 +402,9 @@ void log_progress(char* msg);
 int  create_server(int port);
 void *server_thread(void *args);
 void *sort_thread(void *args);
-void *save_data_thread(void *args);
+void *flush_data_thread(void *args);
+void *load_data_thread(void *args);
 bool test_exit(char* test);
-void save_queue_to_file_buffer_io(std::priority_queue<SortRecord> *q, char* filename);
-void save_queue_to_file_direct_io(std::priority_queue<SortRecord> *q, char* filename);
-void merge_temp_files_and_save(std::priority_queue<SortRecord> *q, char* dir, char* output_file, int io_mode);
-void load_temp_file_to_queue(std::priority_queue<SortRecord> *q, char* filename);
 
 time_t current_time;
 char message[1024];
@@ -342,16 +422,17 @@ struct sort_thread_args
 };
 
 
-struct save_data_thread_args
+struct flush_data_thread_args
 {
 	int thread_id;	
-	int io_mode;
-	int cpu_cores;
-	int partition_factor;
-	int in_memory_factor;
-	char *work_folder;
+	SortDataPlan *data_plan;
 };
 
+struct load_data_thread_args
+{
+	int thread_id;	
+	SortDataPlan *data_plan;
+};
 
 
 /**
@@ -418,27 +499,38 @@ int main(int argc, char* argv[])
 	pthread_t sort_server_thread;
 	struct server_thread_args args;
 	args.node_id     = node_id;
+	args.port_no	 = port_no;
 	args.data_plan   = &data_plan;
 	pthread_create(&sort_server_thread, NULL, server_thread, (void*) &args); 
-	pthread_join(sort_server_thread, NULL);
-	
+	pthread_join(sort_server_thread, NULL);	
+
 	// Now, launch N threads to save the data to disk, N = cpu_cores
-	pthread_t save_data_threads[in_memory];
-	struct save_data_thread_args save_args[in_memory];
-	for (i=0; i<in_memory; i++)
+	pthread_t flush_data_threads[cpu_cores];
+	struct flush_data_thread_args flush_args[cpu_cores];
+	for (i=0; i<cpu_cores; i++)
 	{
-		save_args[i].thread_id = i;
-		save_args[i].io_mode   = io_mode;
-		save_args[i].cpu_cores = cpu_cores;
-		save_args[i].partition_factor = partition_factor;
-		save_args[i].in_memory_factor = in_memory_factor;
-		save_args[i].queue = &sr_queues[i];
-		save_args[i].work_folder = work_folder;
-		pthread_create(&save_data_threads[i], NULL, save_data_thread, (void*) &save_args[i]); 
+		flush_args[i].thread_id = i;
+		flush_args[i].data_plan = &data_plan;
+		pthread_create(&flush_data_threads[i], NULL, flush_data_thread, (void*) &flush_args[i]); 
 	}
-	for (i=0; i<in_memory; i++)
+
+	// sleep shortly to wait for some memory to be released by the flushing threads.
+	sleep(5);	
+
+	// Also, launch N threads to load the data from disk, N = cpu_cores
+	pthread_t load_data_threads[cpu_cores];
+	struct load_data_thread_args load_args[cpu_cores];
+	for (i=0; i<cpu_cores; i++)
 	{
-		pthread_join(save_data_threads[i], NULL);
+		load_args[i].thread_id = i;
+		load_args[i].data_plan = &data_plan;
+		pthread_create(&load_data_threads[i], NULL, load_data_thread, (void*) &load_args[i]); 
+	}
+
+	// Wait for the flush threads to exit
+	for (i=0; i<cpu_cores; i++)
+	{
+		pthread_join(flush_data_threads[i], NULL);
 	}
 
 	// Create the server socket
@@ -461,7 +553,6 @@ int main(int argc, char* argv[])
 void *server_thread(void *args)
 {
 	int i, j;
-	SortDataPlan *data_plan = (SortDataPlan*)  
 	struct server_thread_args *myArgs = (struct server_thread_args*) args;
 	int port_no       = myArgs->port_no;
 	SortDataPlan *data_plan = myArgs->data_plan;
@@ -483,6 +574,7 @@ void *server_thread(void *args)
 
 	sprintf(message, "Waiting for %d sender nodes to connect.", total_nodes);
 	log_progress(message);
+
 	// Wait for all Sender connections
 	// For each Sender, create a pthread with a dedicated queue to handle the incoming data
 	for (i=0; i<total_nodes; i++)
@@ -510,11 +602,21 @@ void *server_thread(void *args)
 	}
 	
 	// Flush all the intermediate data to disk
-	for (i=data_plan->in_memory_partitions; i<data_plan_total_partitions; i++)
+	for (i=data_plan->in_memory_partitions; i<data_plan->total_partitions; i++)
 	{
 		data_plan->partitions[i].final_save_intermediate_buffer();
 	} 
 	
+	// Data Plan
+	for (i=0; i<data_plan->in_memory_partitions; i++)
+	{
+		data_plan->partitions_to_flush.push_back(i);
+	}
+
+	for (i=data_plan->in_memory_partitions; i<data_plan->total_partitions; i++)
+	{
+		data_plan->partitions_to_load.push_back(i);
+	}
 }
 
 /**
@@ -575,7 +677,7 @@ void *sort_thread (void *args)
 	int hash_bar    = data_plan->hash_bar;
 	int lower_range = data_plan->lower_range;
 	int partitions  = data_plan->total_partitions;
-	int in_memory   = data->in_memory_partitions;
+	int in_memory   = data_plan->in_memory_partitions;
 
 	// Print out debug message
 	sprintf(message, "Sender %04d is now connected.", sender_id);
@@ -643,58 +745,46 @@ void *sort_thread (void *args)
 	close(sock);
 }
 
-void *save_data_thread (void *args)
+void *flush_data_thread (void *args)
 {
-	struct save_data_thread_args *myArgs = (struct save_data_thread_args*) args;
+	struct flush_data_thread_args *myArgs = (struct flush_data_thread_args*) args;
 	int thread_id = myArgs->thread_id;
-	int io_mode = myArgs->io_mode;
-	int cpu_cores = myArgs->cpu_cores;
-	int partition_factor = myArgs->partition_factor;
-	int in_memory_factor = myArgs->in_memory_factor;
-	SortRecordQueue *queue = myArgs->queue;
-	char* work_folder = myArgs->work_folder;
-	char folder[1024];
-	char filename[1024];
-	
-	sprintf(filename, "%s/%05d.out", work_folder, thread_id);
-	if (io_mode == 0)
-	{
-		save_queue_to_file_direct_io(&queue->q, filename);
-	}
-	else if (io_mode == 1)
-	{
-		save_queue_to_file_buffer_io(&queue->q, filename);
-	}
+	SortDataPlan *data_plan = myArgs->data_plan;
 
-	// Also, need to work in the intermediate data set 
-	for (int i=1; i<partition_factor/in_memory_factor; i++)
+	while (!data_plan->is_all_flushed())
 	{
-		int partition_id = i*cpu_cores*in_memory_factor + thread_id;
-		sprintf(folder, "%s/%04d", work_folder, partition_id);
-		sprintf(filename, "%s/%05d.out", work_folder, partition_id);
-		merge_temp_files_and_save(&queue->q, folder, filename, io_mode);
+		int partition_id = data_plan->get_partition_to_flush();
+		if (partition_id != -1) // not empty
+		{
+				char filename[1024];
+				sprintf(filename, "%s/%05d.out", data_plan->work_folder, partition_id);
+				data_plan->partitions.at(partition_id).flush_queue_to_disk(data_plan->io_mode);
+		}
+		else
+		{
+			sleep(1);	// sleep for 1 second
+		}
 	}
-
 }
 
-void *save_intermediate_data_thread(void *args)
+
+void *load_data_thread (void *args)
 {
-	// Get filename and buffer
-	struct save_intermediate_thread_args *myArgs = (struct save_intermediate_thread_args*) args;
-	char* filename = myArgs->filename;
-	char* buffer   = myArgs->buffer;
-	int size     = myArgs->size;
+	struct load_data_thread_args *myArgs = (struct load_data_thread_args*) args;
+	int thread_id = myArgs->thread_id;
+	SortDataPlan *data_plan = myArgs->data_plan;
 
-	// Write buffer to file
-	std::ofstream outfile(filename,std::ofstream::binary);
-	outfile.write (buffer, size);
-	outfile.close();
-
-	cout << filename << "Delete buffer\n";
-	// Free the memory
-	delete[] buffer;
-	cout << filename << "Done\n";
+	while (!data_plan->is_load_queue_empty())
+	{
+		int partition_id = data_plan->get_partition_to_load();
+		if (partition_id != -1) // not empty
+		{
+			data_plan->partitions.at(partition_id).load_disk_data();
+			data_plan->add_partition_to_flush(partition_id);
+		}
+	}
 }
+
 
 /**
  *
@@ -710,183 +800,11 @@ bool test_exit(char* test)
 		return false;
 }
 
-
 /**
  *
- * Save the content in a queue to an output file using BufferIO.
+ * Print out messages to console.
  *
  */
-
-void save_queue_to_file_buffer_io(std::priority_queue<SortRecord> *q, char* filename)
-{
-	if (!q->empty())	// only create a file when there are records to write
-	{
-		sprintf(message, "BufferIO writing to file %s.", filename);
-		log_progress(message);
-
-		std::ofstream outfile (filename,std::ofstream::binary);
-		while(!q->empty()) 
-		{
-			outfile.write (q->top().m_data, 100);
-			q->pop();
-		}
-		outfile.close();
-
-		sprintf(message, "BufferIO closing file %s.", filename);
-		log_progress(message);
-	}
-}
-
-
-/**
- *
- * Save the content in a queue to an output file using DirectIO.
- *
- */
-
-void save_queue_to_file_direct_io(std::priority_queue<SortRecord> *q, char* filename)
-{
-	int i, j, base;
-	char* buffer = new char[51200];	// 512 records = 51200 bytes
-
-	// Use DirectIO to save data in 512 record blocks
-	if (q->size() >= 512)
-	{
-		char filename_1[1024];
-		sprintf(filename_1, "%s-1", filename);
-		sprintf(message, "DirectIO writing to file %s.", filename_1);
-		log_progress(message);
-
-		int fd = open(filename_1, O_RDWR | O_CREAT | O_DIRECT | O_TRUNC, 0644);
-		// DirectIO buffer, 512 is block size, 51200 is buffer size for 512 records
-		void *temp = memalign(512, 51200);
-		while (q->size() >=512)
-		{
-			base = 0;
-			for (i=0; i<512; i++)	// Get 512 records at a time
-			{
-				base = i * 100;
-				memcpy(buffer+base, q->top().m_data, 100);
-				q->pop();
-			}
-			memcpy(temp, buffer, 51200);
-			write(fd, temp, 51200);
-		}
-		free(temp);
-		close(fd);
-
-		sprintf(message, "DirectIO closing file %s.", filename_1);
-		log_progress(message);
-	}
-
-	// Use BufferIO to save the rese data
-	if (!q->empty())
-	{
-		char filename_2[1024];
-		sprintf(filename_2, "%s-2", filename);
-		sprintf(message, "BufferIO writing to file %s.", filename_2);
-		log_progress(message);
-		std::ofstream outfile (filename_2,std::ofstream::binary);
-		i = 0;
-		while(!q->empty()) 
-		{
-			base = i * 100;
-			memcpy(buffer+base, q->top().m_data, 100);
-			q->pop();
-			i++;
-		}
-		outfile.write (buffer, i*100);
-		outfile.close();
-		sprintf(message, "BufferIO closing file %s.", filename_2);
-		log_progress(message);
-	}
-	
-	delete[] buffer;
-}
-
-
-/**
- *
- * Load intermediate data from a bunch of files in the temporary directory into a single queue.
- * Then save the queue to the final output file.
- *
- */
-
-void merge_temp_files_and_save(std::priority_queue<SortRecord> *q, char* dir, char* output_file, int io_mode)
-{
-	DIR *dpdf;
-	struct dirent *epdf;
-	char filename_string[1024];
-//	std::priority_queue<SortRecord> q;
-
-	dpdf = opendir(dir);
-	if (dpdf != NULL)
-	{
-		// Load data from all the files in the temporary directory
-		while (epdf = readdir(dpdf))
-		{
-			if ((strcmp(epdf->d_name, ".") && strcmp(epdf->d_name, "..")))
-			{
-				sprintf(filename_string, "%s/%s",dir, epdf->d_name);
-//				sprintf(message, "Merging intermediate records from %s.", filename_string);
-//				log_progress(message);
-				load_temp_file_to_queue(q, filename_string);
-			}
-		}
-	}
-
-	// Save merged results to the final output file
-	if (io_mode == 0)
-	{
-		save_queue_to_file_direct_io(q, output_file);
-	}
-	else
-	{
-		save_queue_to_file_buffer_io(q, output_file);	
-	}
-}
-
-/**
- *
- * Load data from a single intermediate file into the queue.
- *
- */
-
-void load_temp_file_to_queue(std::priority_queue<SortRecord> *q, char* filename)
-{
-	// create an ifstream from the file
-	ifstream in(filename, ifstream::in | ios::binary);
-
-	if (in)	// the file was open successfully
-	{
-		// Get file size
-		in.seekg(0, std::ios::end);
-		int size = in.tellg();
-		// Create a buffer as large as the file itself
-		char * buffer = new char[in.tellg()];
-		// Go back to the beginning of the file and read the whole thing
-		in.seekg(0, std::ios::beg);
-		in.read(buffer, size);
-		// Close the file
-		in.close();
-
-		// We know that each record is 100 bytes 
-		int count = size / 100;
-		int i=0, j=0, start = 0;
-		char record[100];
-		for (i=0; i<count; i++)
-		{
-			start = 100*i;
-			// Create a SortRecord
-			SortRecord sr;
-			memcpy(sr.m_data, buffer+start, 100);
-			q->push(sr);
-		}
-
-		// free the memory being used by the file buffer
-		delete[] buffer;
-	}
-}
 
 void log_progress(char* msg)
 {
