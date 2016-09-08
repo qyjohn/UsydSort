@@ -472,9 +472,6 @@ int main(int argc, char* argv[])
 	
 	// Get the number of CPU cores
 	unsigned cpu_cores = std::thread::hardware_concurrency();
-	// No matter how many partitions we have, we only create N = cpu_cores x in_memory_factor SortRecordQueue for 
-	// in-memory storage. Data for other partitions are considered as intermediate data and we store
-	// them on to disk immediately for further read-sort-write.
 	int hash_bar = floor (65536 / (total_nodes * total_partitions));
 	int lower_range = floor(65535 * node_id / total_nodes);
 	SortDataPlan	data_plan;
@@ -514,6 +511,7 @@ int main(int argc, char* argv[])
 		pthread_create(&flush_data_threads[i], NULL, flush_data_thread, (void*) &flush_args[i]); 
 	}
 
+/*
 	// sleep shortly to wait for some memory to be released by the flushing threads.
 	sleep(5);	
 
@@ -526,7 +524,7 @@ int main(int argc, char* argv[])
 		load_args[i].data_plan = &data_plan;
 		pthread_create(&load_data_threads[i], NULL, load_data_thread, (void*) &load_args[i]); 
 	}
-
+*/
 	// Wait for the flush threads to exit
 	for (i=0; i<cpu_cores; i++)
 	{
@@ -751,7 +749,7 @@ void *flush_data_thread (void *args)
 	int thread_id = myArgs->thread_id;
 	SortDataPlan *data_plan = myArgs->data_plan;
 
-	while (!data_plan->is_all_flushed())
+	while (!data_plan->is_flush_queue_empty())
 	{
 		int partition_id = data_plan->get_partition_to_flush();
 		if (partition_id != -1) // not empty
@@ -760,11 +758,24 @@ void *flush_data_thread (void *args)
 				sprintf(filename, "%s/%05d.out", data_plan->work_folder, partition_id);
 				data_plan->partitions.at(partition_id).flush_queue_to_disk(data_plan->io_mode);
 		}
-		else
+/*		else
 		{
 			sleep(1);	// sleep for 1 second
 		}
+*/
 	}
+	
+	while (!data_plan->is_load_queue_empty())
+	{
+		int partition_id = data_plan->get_partition_to_load();
+		if (partition_id != -1) // not empty
+		{
+			data_plan->partitions.at(partition_id).load_disk_data();
+			data_plan->add_partition_to_flush(partition_id);
+			data_plan->partitions.at(partition_id).flush_queue_to_disk(data_plan->io_mode);
+		}
+	}
+	
 }
 
 
