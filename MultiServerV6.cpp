@@ -128,6 +128,10 @@ class SortPartition
 		
 		void load_disk_data()
 		{
+			// 3 GB memory lower bound
+			// Lazy load only occurs when the current available memory is greater than the lower bound
+			unsigned long mem_lower_bound = 3000000; 
+
 			sprintf(message, "Loading intermediate partition %04d", partition_id);
 			log_progress(message);
 
@@ -146,6 +150,10 @@ class SortPartition
 					if ((strcmp(epdf->d_name, ".") && strcmp(epdf->d_name, "..")))
 					{
 						sprintf(filename_string, "%s/%s", load_folder, epdf->d_name);
+						while (get_mem_total() < mem_lower_bound)
+						{
+							sleep(1);
+						}
 						load_temp_file(filename_string);
 					}
 				}
@@ -276,6 +284,33 @@ class SortPartition
 			time(&current_time);
 			cout << current_time << "\t" << msg << "\n";
 		}
+		
+		unsigned long get_mem_total() 
+		{
+			std::string token;
+			std::ifstream file("/proc/meminfo");
+			while(file >> token) 
+			{
+				if(token == "MemAvailable:") 
+				{
+					unsigned long mem;
+					if(file >> mem) 
+					{
+						return mem;
+					} 
+					else 
+					{
+						return 0;       
+					}
+				}
+				
+				// ignore rest of the line
+				file.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+			}
+			
+			return 0; // nothing found
+		}
+		
 		
 };
 
@@ -511,10 +546,6 @@ int main(int argc, char* argv[])
 		pthread_create(&flush_data_threads[i], NULL, flush_data_thread, (void*) &flush_args[i]); 
 	}
 
-/*
-	// sleep shortly to wait for some memory to be released by the flushing threads.
-	sleep(5);	
-
 	// Also, launch N threads to load the data from disk, N = cpu_cores
 	pthread_t load_data_threads[cpu_cores];
 	struct load_data_thread_args load_args[cpu_cores];
@@ -524,7 +555,7 @@ int main(int argc, char* argv[])
 		load_args[i].data_plan = &data_plan;
 		pthread_create(&load_data_threads[i], NULL, load_data_thread, (void*) &load_args[i]); 
 	}
-*/
+
 	// Wait for the flush threads to exit
 	for (i=0; i<cpu_cores; i++)
 	{
@@ -758,24 +789,11 @@ void *flush_data_thread (void *args)
 				sprintf(filename, "%s/%05d.out", data_plan->work_folder, partition_id);
 				data_plan->partitions.at(partition_id).flush_queue_to_disk(data_plan->io_mode);
 		}
-/*		else
+		else
 		{
 			sleep(1);	// sleep for 1 second
 		}
-*/
 	}
-	
-	while (!data_plan->is_load_queue_empty())
-	{
-		int partition_id = data_plan->get_partition_to_load();
-		if (partition_id != -1) // not empty
-		{
-			data_plan->partitions.at(partition_id).load_disk_data();
-			data_plan->add_partition_to_flush(partition_id);
-			data_plan->partitions.at(partition_id).flush_queue_to_disk(data_plan->io_mode);
-		}
-	}
-	
 }
 
 
@@ -789,7 +807,7 @@ void *load_data_thread (void *args)
 	{
 		int partition_id = data_plan->get_partition_to_load();
 		if (partition_id != -1) // not empty
-		{
+		{			
 			data_plan->partitions.at(partition_id).load_disk_data();
 			data_plan->add_partition_to_flush(partition_id);
 		}
@@ -822,3 +840,4 @@ void log_progress(char* msg)
 	time(&current_time);
 	cout << current_time << "\t" << msg << "\n";
 }
+
