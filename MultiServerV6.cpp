@@ -150,7 +150,8 @@ class SortPartition
 					if ((strcmp(epdf->d_name, ".") && strcmp(epdf->d_name, "..")))
 					{
 						sprintf(filename_string, "%s/%s", load_folder, epdf->d_name);
-						while (get_mem_total() < mem_lower_bound)
+						// check available memory before doing lazy load
+						while (get_mem_available() < mem_lower_bound)
 						{
 							sleep(1);
 						}
@@ -285,7 +286,7 @@ class SortPartition
 			cout << current_time << "\t" << msg << "\n";
 		}
 		
-		unsigned long get_mem_total() 
+		unsigned long get_mem_available() 
 		{
 			std::string token;
 			std::ifstream file("/proc/meminfo");

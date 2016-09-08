@@ -10,6 +10,7 @@ all:
 	$(CC) $(CFLAGS) SortServer.cpp -lpthread -o bin/SortServer
 	g++ -std=c++11 Sender.cpp -o bin/Sender
 	g++ -std=c++11 SenderV5.cpp -o bin/SenderV5
+	g++ -std=c++11 SenderV6.cpp -o bin/SenderV6
 	g++ -std=c++11 GenBatch.cpp -o bin/GenBatch
 	g++ -std=c++11 Validate.cpp -o bin/Validate
 	g++ -std=c++11 Test.cpp -o bin/Test
