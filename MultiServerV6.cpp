@@ -57,6 +57,7 @@ class SortRecord
 class SortPartition
 {
 	public:
+		int node_id;
 		int partition_id;	// partition id
 		int partition_type;	// 0 is in-memory partition, 1 is on-disk (intermediate) partition
 		pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -70,9 +71,10 @@ class SortPartition
 		char *buffer;
 		
 		// Initialize the partition
-		void initialize(int id, int type, char* folder)
+		void initialize(int node, int partition, int type, char* folder)
 		{
-			partition_id = id;
+			node_id = node;
+			partition_id = partition;
 			partition_type = type;
 			work_folder = folder;
 			if (partition_type == 1)
@@ -130,7 +132,7 @@ class SortPartition
 		{
 			// 4 GB memory lower bound
 			// Lazy load only occurs when the current available memory is greater than the lower bound
-			unsigned long mem_lower_bound = 4000000; 
+			unsigned long mem_lower_bound = 8000000; 
 
 			sprintf(message, "Loading intermediate partition %04d", partition_id);
 			log_progress(message);
@@ -274,7 +276,7 @@ class SortPartition
 			log_progress(message);
 
 			char filename[1024];
-			sprintf(filename, "%s/%05d.out", work_folder, partition_id);
+			sprintf(filename, "%s/%04d-%05d.out", work_folder, node_id, partition_id);
 			if (io_mode == 0)
 			{
 				save_queue_to_file_buffer_io(filename);
@@ -363,12 +365,12 @@ class SortDataPlan
 			if (i<memory)
 			{
 				// in-memory partition
-				all_partitions[i].initialize(i, 0, work_folder);
+				all_partitions[i].initialize(node_id, i, 0, work_folder);
 			}
 			else
 			{
 				// intermediate (on-disk) partition
-				all_partitions[i].initialize(i, 1, work_folder);
+				all_partitions[i].initialize(node_id, i, 1, work_folder);
 			}
 			partitions.push_back(all_partitions[i]);
 		} 
