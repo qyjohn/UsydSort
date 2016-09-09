@@ -130,9 +130,9 @@ class SortPartition
 		
 		void load_disk_data(bool lazy_load)
 		{
-			// 4 GB memory lower bound
+			// 10 GB memory lower bound
 			// Lazy load only occurs when the current available memory is greater than the lower bound
-			unsigned long mem_lower_bound = 8000000; 
+			unsigned long mem_lower_bound = 10000000; 
 
 			sprintf(message, "Loading intermediate partition %04d", partition_id);
 			log_progress(message);
@@ -285,6 +285,9 @@ class SortPartition
 			{
 				save_queue_to_file_buffer_io(filename);
 			}
+
+			sprintf(message, "Completed partition %04d", partition_id);
+			log_progress(message);
 		}
 
 		void log_progress(char* msg)
