@@ -155,8 +155,6 @@ class SortPartition
 							// check available memory before doing lazy load
 							while (get_mem_available() < mem_lower_bound)
 							{
-								sprintf(message, "Memory Available: %lu", get_mem_available());
-								log_progress(message);
 								sleep(1);
 							}
 						}
@@ -789,7 +787,7 @@ void *flush_data_thread (void *args)
 	int thread_id = myArgs->thread_id;
 	SortDataPlan *data_plan = myArgs->data_plan;
 
-	while (!data_plan->is_flush_queue_empty())
+	while (!data_plan->is_all_flushed())
 	{
 		int partition_id = data_plan->get_partition_to_flush();
 		if (partition_id != -1) // not empty
