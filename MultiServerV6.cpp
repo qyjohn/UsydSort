@@ -567,10 +567,12 @@ int main(int argc, char* argv[])
 
 	if (lazy_load)
 	{
-		// Also, launch N threads to load the data from disk, N = cpu_cores
-		pthread_t load_data_threads[cpu_cores];
-		struct load_data_thread_args load_args[cpu_cores];
-		for (i=0; i<cpu_cores; i++)
+		// Also, launch N threads to load the data from disk, N = cpu_cores / 2
+		// is 1/2 enough? might try 1/4 or something smaller
+		int lazy_load_thread_count = (int) (cpu_cores / 2);
+		pthread_t load_data_threads[lazy_load_thread_count];
+		struct load_data_thread_args load_args[lazy_load_thread_count];
+		for (i=0; i<lazy_load_thread_count; i++)
 		{
 			load_args[i].thread_id = i;
 			load_args[i].data_plan = &data_plan;
@@ -813,7 +815,14 @@ void *flush_data_thread (void *args)
 			}
 			else
 			{
-				sleep(1);	// sleep for 1 second
+				// No partition to flush, then load some data from on-disk partitions
+				int load_partition_id = data_plan->get_partition_to_load();
+				if (load_partition_id != -1) // not empty
+				{			
+					bool lazy_load = false;
+					data_plan->partitions.at(load_partition_id).load_disk_data(lazy_load);
+					data_plan->add_partition_to_flush(load_partition_id);
+				}
 			}
 		}
 	}
