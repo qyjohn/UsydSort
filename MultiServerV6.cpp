@@ -1,5 +1,5 @@
 /*
- *  MultiServerV5 <total_nodes> <node_id> <server_port> <total_partitions> <in_memory_partitions> <io_mode> <work_folder>
+ *  MultiServerV5 <total_nodes> <node_id> <server_port> <total_partitions> <in_memory_partitions> <io_mode> <work_folder> <lazy_load>
  *
  */
 
@@ -334,12 +334,13 @@ class SortDataPlan
 	public:
 	int i, hash_bar, lower_range, partitions_done;
 	int node_count, node_id, cpu_cores, total_partitions, in_memory_partitions, io_mode;
+	bool lazy_load;
 	char *work_folder;
 	std::vector<SortPartition> partitions;
 	std::vector<int> partitions_to_flush, partitions_to_load;
 	pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
-	void initialize(int count, int id, int cores, int total, int memory, char* folder, int mode)
+	void initialize(int count, int id, int cores, int total, int memory, char* folder, int mode, bool load)
 	{
 		node_count = count;
 		node_id = id;
@@ -348,6 +349,7 @@ class SortDataPlan
 		in_memory_partitions = memory;
 		work_folder = folder;
 		io_mode = mode;
+		lazy_load = load;
 		
 		hash_bar = floor (65536 / (node_count * total_partitions));
 		lower_range = floor(65535 * node_id / node_count);
@@ -511,13 +513,23 @@ int main(int argc, char* argv[])
 	int in_memory_partitions = atoi(argv[5]); // in-memory partitions
 	int io_mode          = atoi(argv[6]); // 0 is DirectIO, 1 is BufferIO
 	char *work_folder    = argv[7];
+
+	bool lazy_load;	// lazy load
+	if (atoi(argv[8]) > 0)
+	{
+		lazy_load = true;
+	}
+	else
+	{
+		lazy_load = false;
+	}
 	
 	// Get the number of CPU cores
 	unsigned cpu_cores = std::thread::hardware_concurrency();
 	int hash_bar = floor (65536 / (total_nodes * total_partitions));
 	int lower_range = floor(65535 * node_id / total_nodes);
 	SortDataPlan	data_plan;
-	data_plan.initialize(total_nodes, node_id, cpu_cores, total_partitions, in_memory_partitions, work_folder, io_mode);
+	data_plan.initialize(total_nodes, node_id, cpu_cores, total_partitions, in_memory_partitions, work_folder, io_mode, lazy_load);
 	
 
 	// Clean up the work folder by doing a "rm -Rf" and then make sure that it is created again
@@ -553,14 +565,17 @@ int main(int argc, char* argv[])
 		pthread_create(&flush_data_threads[i], NULL, flush_data_thread, (void*) &flush_args[i]); 
 	}
 
-	// Also, launch N threads to load the data from disk, N = cpu_cores
-	pthread_t load_data_threads[cpu_cores];
-	struct load_data_thread_args load_args[cpu_cores];
-	for (i=0; i<cpu_cores; i++)
+	if (lazy_load)
 	{
-		load_args[i].thread_id = i;
-		load_args[i].data_plan = &data_plan;
-		pthread_create(&load_data_threads[i], NULL, load_data_thread, (void*) &load_args[i]); 
+		// Also, launch N threads to load the data from disk, N = cpu_cores
+		pthread_t load_data_threads[cpu_cores];
+		struct load_data_thread_args load_args[cpu_cores];
+		for (i=0; i<cpu_cores; i++)
+		{
+			load_args[i].thread_id = i;
+			load_args[i].data_plan = &data_plan;
+			pthread_create(&load_data_threads[i], NULL, load_data_thread, (void*) &load_args[i]); 
+		}
 	}
 
 	// Wait for the flush threads to exit
@@ -787,18 +802,39 @@ void *flush_data_thread (void *args)
 	int thread_id = myArgs->thread_id;
 	SortDataPlan *data_plan = myArgs->data_plan;
 
-	while (!data_plan->is_all_flushed())
+	if (data_plan->lazy_load)
 	{
-		int partition_id = data_plan->get_partition_to_flush();
-		if (partition_id != -1) // not empty
+		while (!data_plan->is_all_flushed())
 		{
-				char filename[1024];
-				sprintf(filename, "%s/%05d.out", data_plan->work_folder, partition_id);
+			int partition_id = data_plan->get_partition_to_flush();
+			if (partition_id != -1) // not empty
+			{
 				data_plan->partitions.at(partition_id).flush_queue_to_disk(data_plan->io_mode);
+			}
+			else
+			{
+				sleep(1);	// sleep for 1 second
+			}
 		}
-		else
+	}
+	else
+	{
+		while (!data_plan->is_flush_queue_empty())
 		{
-			sleep(1);	// sleep for 1 second
+			int partition_id = data_plan->get_partition_to_flush();
+			if (partition_id != -1) // not empty
+			{
+				data_plan->partitions.at(partition_id).flush_queue_to_disk(data_plan->io_mode);
+			}
+		}
+		while (!data_plan->is_load_queue_empty())
+		{
+			int partition_id = data_plan->get_partition_to_load();
+			if (partition_id != -1) // not empty
+			{			
+				data_plan->partitions.at(partition_id).load_disk_data(true);
+				data_plan->partitions.at(partition_id).flush_queue_to_disk(data_plan->io_mode);
+			}
 		}
 	}
 }
