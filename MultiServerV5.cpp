@@ -545,10 +545,11 @@ void *save_data_thread (void *args)
 	// Also, need to work in the intermediate data set 
 	for (int i=1; i<partition_factor/in_memory_factor; i++)
 	{
+		std::priority_queue<SortRecord> new_q; 
 		int partition_id = i*cpu_cores*in_memory_factor + thread_id;
 		sprintf(folder, "%s/%04d", work_folder, partition_id);
 		sprintf(filename, "%s/%05d.out", work_folder, partition_id);
-		merge_temp_files_and_save(&queue->q, folder, filename, io_mode);
+		merge_temp_files_and_save(&new_q, folder, filename, io_mode);
 	}
 
 }
