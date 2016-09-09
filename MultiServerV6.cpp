@@ -126,11 +126,11 @@ class SortPartition
 			}
 		}
 		
-		void load_disk_data()
+		void load_disk_data(bool lazy_load)
 		{
 			// 3 GB memory lower bound
 			// Lazy load only occurs when the current available memory is greater than the lower bound
-			unsigned long mem_lower_bound = 3000000; 
+			unsigned long mem_lower_bound = 6500000; 
 
 			sprintf(message, "Loading intermediate partition %04d", partition_id);
 			log_progress(message);
@@ -150,10 +150,15 @@ class SortPartition
 					if ((strcmp(epdf->d_name, ".") && strcmp(epdf->d_name, "..")))
 					{
 						sprintf(filename_string, "%s/%s", load_folder, epdf->d_name);
-						// check available memory before doing lazy load
-						while (get_mem_available() < mem_lower_bound)
+						if (lazy_load)
 						{
-							sleep(1);
+							// check available memory before doing lazy load
+							while (get_mem_available() < mem_lower_bound)
+							{
+								sprintf(message, "Memory Available: %lu", get_mem_available());
+								log_progress(message);
+								sleep(1);
+							}
 						}
 						load_temp_file(filename_string);
 					}
@@ -163,6 +168,9 @@ class SortPartition
 		
 		void load_temp_file(char* filename)
 		{
+			sprintf(message, "Loading %s", filename);
+			log_progress(message);
+
 			// create an ifstream from the file
 			ifstream in(filename, ifstream::in | ios::binary);
 		
@@ -809,7 +817,8 @@ void *load_data_thread (void *args)
 		int partition_id = data_plan->get_partition_to_load();
 		if (partition_id != -1) // not empty
 		{			
-			data_plan->partitions.at(partition_id).load_disk_data();
+			bool lazy_load = true;
+			data_plan->partitions.at(partition_id).load_disk_data(lazy_load);
 			data_plan->add_partition_to_flush(partition_id);
 		}
 	}
