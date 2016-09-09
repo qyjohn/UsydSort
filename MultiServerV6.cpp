@@ -824,7 +824,7 @@ void *flush_data_thread (void *args)
 				int load_partition_id = data_plan->get_partition_to_load();
 				if (load_partition_id != -1) // not empty
 				{			
-					bool lazy_load = false;
+					bool lazy_load = true;
 					data_plan->partitions.at(load_partition_id).load_disk_data(lazy_load);
 					data_plan->add_partition_to_flush(load_partition_id);
 				}
