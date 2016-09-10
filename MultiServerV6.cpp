@@ -64,7 +64,7 @@ class SortPartition
 		std::priority_queue<SortRecord> q;	
 		char* work_folder;
 		// The following parameters are used for intermediate partitions only
-		int buffer_size=1000000;
+		int buffer_size=500000;
 		int record_counter = 0;
 		int file_counter   = 0;
 		char filename[1024], message[1024];

@@ -1,3 +1,14 @@
+2016-09-10
+
+400 input files on each node, direct io, 64 partitions, 32 in memory
+4 nodes, data transfer 1179 seconds, file saving 1006 seconds, total 2185 seconds. 
+
+400 input files on each node, direct io, 128 partitions, 64 in memory
+4 nodes, data transfer 1179 seconds, file saving 1006 seconds, total 2185 seconds. 
+
+
+2016-09-06
+
 440 input files on each node, direct io
 2 nodes, 3113 seconds, data transfer 1979 seconds. File saving 1134 seconds.
 
