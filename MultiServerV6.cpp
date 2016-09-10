@@ -794,7 +794,6 @@ void *sort_thread (void *args)
 			}
 		}
 
-		cout <<"Check\n";
 		// Check exit signal
 		marker = size % 100;
 		if (marker == 4)
