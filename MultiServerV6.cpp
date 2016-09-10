@@ -1,5 +1,5 @@
 /*
- *  MultiServerV5 <total_nodes> <node_id> <server_port> <total_partitions> <in_memory_partitions> <io_mode> <work_folder> <lazy_load>
+ *  MultiServerV5 <total_nodes> <node_id> <server_port> <total_partitions> <in_memory_partitions> <io_mode> <work_folder> <lazy_load> <lazy_load_threads>
  *
  */
 
@@ -169,13 +169,14 @@ class SortPartition
 					}
 				}
 			}
+
+			sprintf(message, "Intermediate partition %04d ready to flush", partition_id);
+			log_progress(message);
+
 		}
 		
 		void load_temp_file(char* filename)
 		{
-			sprintf(message, "Loading %s", filename);
-			log_progress(message);
-
 			// create an ifstream from the file
 			ifstream in(filename, ifstream::in | ios::binary);
 		
@@ -523,11 +524,13 @@ int main(int argc, char* argv[])
 	int in_memory_partitions = atoi(argv[5]); // in-memory partitions
 	int io_mode          = atoi(argv[6]); // 0 is DirectIO, 1 is BufferIO
 	char *work_folder    = argv[7];
-
+	
 	bool lazy_load;	// lazy load
+	int lazy_load_thread_count = 0;
 	if (atoi(argv[8]) > 0)
 	{
 		lazy_load = true;
+		lazy_load_thread_count = atoi(argv[9]);
 	}
 	else
 	{
@@ -577,9 +580,7 @@ int main(int argc, char* argv[])
 
 	if (lazy_load)
 	{
-		// Also, launch N threads to load the data from disk, N = cpu_cores / 2
-		// is 1/2 enough? might try 1/4 or something smaller
-		int lazy_load_thread_count = (int) (cpu_cores / 2);
+		// Lazy load threads
 		pthread_t load_data_threads[lazy_load_thread_count];
 		struct load_data_thread_args load_args[lazy_load_thread_count];
 		for (i=0; i<lazy_load_thread_count; i++)

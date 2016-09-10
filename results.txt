@@ -1,10 +1,10 @@
 2016-09-10
 
-400 input files on each node, direct io, 64 partitions, 32 in memory
+400 input files on each node, buffer io, 64 partitions, 32 in memory, 16 lazy load threads 
 4 nodes, data transfer 1179 seconds, file saving 1006 seconds, total 2185 seconds. 
 
-400 input files on each node, direct io, 128 partitions, 64 in memory
-4 nodes, data transfer 1179 seconds, file saving 1006 seconds, total 2185 seconds. 
+400 input files on each node, buffer io, 128 partitions, 64 in memory, 16 lazy load threads 
+4 nodes, data transfer 1190 seconds, file saving 1005 seconds, total 2195 seconds. 
 
 
 2016-09-06
