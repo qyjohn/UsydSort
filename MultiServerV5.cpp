@@ -549,7 +549,7 @@ void *save_data_thread (void *args)
 		int partition_id = i*cpu_cores*in_memory_factor + thread_id;
 		sprintf(folder, "%s/%04d", work_folder, partition_id);
 		sprintf(filename, "%s/%05d.out", work_folder, partition_id);
-		merge_temp_files_and_save(&new_q, folder, filename, io_mode);
+		merge_temp_files_and_save(&queue->q, folder, filename, io_mode);
 	}
 
 }
