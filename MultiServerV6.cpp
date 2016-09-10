@@ -83,6 +83,11 @@ class SortPartition
 			}
 		}
 
+		void finalize()
+		{
+			q = std::priority_queue<SortRecord>();
+		}
+
 		// Queue operations
 		void push(SortRecord sr)
 		{
@@ -341,7 +346,7 @@ class SortDataPlan
 	int node_count, node_id, cpu_cores, total_partitions, in_memory_partitions, io_mode;
 	bool lazy_load;
 	char *work_folder;
-	std::vector<SortPartition*> partitions;
+	std::vector<SortPartition> partitions;
 	std::vector<int> partitions_to_flush, partitions_to_load;
 	pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -375,7 +380,7 @@ class SortDataPlan
 				// intermediate (on-disk) partition
 				all_partitions[i].initialize(node_id, i, 1, work_folder);
 			}
-			partitions.push_back(&all_partitions[i]);
+			partitions.push_back(all_partitions[i]);
 		} 
 	}
 
@@ -662,7 +667,7 @@ void *server_thread(void *args)
 	// Flush all the intermediate data to disk
 	for (i=data_plan->in_memory_partitions; i<data_plan->total_partitions; i++)
 	{
-		data_plan->partitions[i]->final_save_intermediate_buffer();
+		data_plan->partitions[i].final_save_intermediate_buffer();
 	} 
 	
 	// Data Plan
@@ -779,16 +784,17 @@ void *sort_thread (void *args)
 				// Create a SortRecord
 				SortRecord sr;
 				memcpy(sr.m_data, buffer + 100*i, 100);
-				data_plan->partitions.at(partition)->push(sr);
+				data_plan->partitions.at(partition).push(sr);
 			}
 			else	// on disk
 			{
 				// Push the data into inermediate queue
 				memcpy(temp, buffer + 100*i, 100);
-				data_plan->partitions.at(partition)->add_intermediate_record(temp);
+				data_plan->partitions.at(partition).add_intermediate_record(temp);
 			}
 		}
 
+		cout <<"Check\n";
 		// Check exit signal
 		marker = size % 100;
 		if (marker == 4)
@@ -816,7 +822,8 @@ void *flush_data_thread (void *args)
 			int partition_id = data_plan->get_partition_to_flush();
 			if (partition_id != -1) // not empty
 			{
-				data_plan->partitions.at(partition_id)->flush_queue_to_disk(data_plan->io_mode);
+				data_plan->partitions.at(partition_id).flush_queue_to_disk(data_plan->io_mode);
+				data_plan->partitions.at(partition_id).finalize();
 			}
 			else
 			{
@@ -825,7 +832,7 @@ void *flush_data_thread (void *args)
 				if (load_partition_id != -1) // not empty
 				{			
 					bool lazy_load = true;
-					data_plan->partitions.at(load_partition_id)->load_disk_data(lazy_load);
+					data_plan->partitions.at(load_partition_id).load_disk_data(lazy_load);
 					data_plan->add_partition_to_flush(load_partition_id);
 				}
 			}
@@ -838,7 +845,8 @@ void *flush_data_thread (void *args)
 			int partition_id = data_plan->get_partition_to_flush();
 			if (partition_id != -1) // not empty
 			{
-				data_plan->partitions.at(partition_id)->flush_queue_to_disk(data_plan->io_mode);
+				data_plan->partitions.at(partition_id).flush_queue_to_disk(data_plan->io_mode);
+				data_plan->partitions.at(partition_id).finalize();
 			}
 		}
 		while (!data_plan->is_load_queue_empty())
@@ -846,8 +854,9 @@ void *flush_data_thread (void *args)
 			int partition_id = data_plan->get_partition_to_load();
 			if (partition_id != -1) // not empty
 			{			
-				data_plan->partitions.at(partition_id)->load_disk_data(true);
-				data_plan->partitions.at(partition_id)->flush_queue_to_disk(data_plan->io_mode);
+				data_plan->partitions.at(partition_id).load_disk_data(true);
+				data_plan->partitions.at(partition_id).flush_queue_to_disk(data_plan->io_mode);
+				data_plan->partitions.at(partition_id).finalize();
 			}
 		}
 	}
@@ -866,7 +875,7 @@ void *load_data_thread (void *args)
 		if (partition_id != -1) // not empty
 		{			
 			bool lazy_load = true;
-			data_plan->partitions.at(partition_id)->load_disk_data(lazy_load);
+			data_plan->partitions.at(partition_id).load_disk_data(lazy_load);
 			data_plan->add_partition_to_flush(partition_id);
 		}
 	}
